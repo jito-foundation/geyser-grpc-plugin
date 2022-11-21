@@ -1,5 +1,5 @@
 # geyser-grpc-plugin
-A lightweight gRPC service for streaming account and slot updates to subscribers.
+A lightweight gRPC service for streaming account and slot updates to subscribers. Use the `submod` branch if you're looking to have this repo as a submodule in your `solana` repo.
 
 ## server
 This where the server side logic lives i.e implements the geyser-plugin-interface, wires up the gRPC service, and manages connections.
