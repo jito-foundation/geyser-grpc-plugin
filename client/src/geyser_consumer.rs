@@ -69,6 +69,8 @@ pub type Result<T> = std::result::Result<T, GeyserConsumerError>;
 pub const HIGHEST_WRITE_SLOT_HEADER: &str = "highest-write-slot";
 
 pub type AccountWriteSeqs = HashMap<Slot, HashMap<Pubkey, AccountWriteSeq>>;
+
+#[derive(Clone)]
 pub struct AccountWriteSeq {
     /// This account's write sequence since the first write.
     global_seq: u64,
@@ -77,25 +79,16 @@ pub struct AccountWriteSeq {
     slot_seq: u64,
 }
 
+#[derive(Clone)]
 pub struct GeyserConsumer {
     /// Geyser client.
     client: GeyserClient<Channel>,
 
     /// Tokio runtime used to wrap async calls.
-    runtime: Runtime,
+    runtime: Arc<Runtime>,
 
     /// Used to discard account writes received out of order.
     account_write_sequences: AccountWriteSeqs,
-
-    /// Oldest slot from root consumer willing to tolerate.
-    /// e.g.
-    ///     current slot = 12, max_rooted_slot_distance = 6
-    ///     new slot = 13
-    ///     new slot = 6 -> Error
-    max_rooted_slot_distance: u64,
-
-    /// Maximum number of heartbeats we're willing to consecutively miss before assuming something's wrong.
-    max_allowable_missed_heartbeats: usize,
 
     /// Exit signal.
     exit: Arc<AtomicBool>,
@@ -104,17 +97,13 @@ pub struct GeyserConsumer {
 impl GeyserConsumer {
     pub fn new(
         client: GeyserClient<Channel>,
-        runtime: Runtime,
-        max_rooted_slot_distance: u64,
-        max_allowable_missed_heartbeats: usize,
+        runtime: Arc<Runtime>,
         exit: Arc<AtomicBool>,
     ) -> Self {
         Self {
             client,
             runtime,
             account_write_sequences: HashMap::default(),
-            max_rooted_slot_distance,
-            max_allowable_missed_heartbeats,
             exit,
         }
     }
@@ -123,6 +112,14 @@ impl GeyserConsumer {
         mut self,
         tx: Sender<Result<AccountUpdate>>,
         highest_rooted_slot: Arc<AtomicU64>,
+        // Oldest slot from root consumer willing to tolerate.
+        // e.g.
+        //    current slot = 12, max_rooted_slot_distance = 6
+        //    new slot = 13
+        //    new slot = 6 -> Error
+        max_rooted_slot_distance: u64,
+        // Maximum number of heartbeats we're willing to consecutively miss before assuming something's wrong.
+        max_allowable_missed_heartbeats: usize,
         skip_vote_accounts: bool,
     ) -> Result<()> {
         let expected_heartbeat_interval_ms = self
@@ -145,9 +142,9 @@ impl GeyserConsumer {
             self.account_write_sequences,
             highest_rooted_slot,
             oldest_write_slot,
-            self.max_rooted_slot_distance,
+            max_rooted_slot_distance,
             Duration::from_millis(expected_heartbeat_interval_ms),
-            self.max_allowable_missed_heartbeats,
+            max_allowable_missed_heartbeats,
             self.exit.clone(),
         ));
 
@@ -158,6 +155,8 @@ impl GeyserConsumer {
         mut self,
         tx: Sender<Result<PartialAccountUpdate>>,
         highest_rooted_slot: Arc<AtomicU64>,
+        max_rooted_slot_distance: u64,
+        max_allowable_missed_heartbeats: usize,
         skip_vote_accounts: bool,
     ) -> Result<()> {
         let expected_heartbeat_interval_ms = self
@@ -183,9 +182,9 @@ impl GeyserConsumer {
                 self.account_write_sequences,
                 highest_rooted_slot,
                 oldest_write_slot,
-                self.max_rooted_slot_distance,
+                max_rooted_slot_distance,
                 Duration::from_millis(expected_heartbeat_interval_ms),
-                self.max_allowable_missed_heartbeats,
+                max_allowable_missed_heartbeats,
                 self.exit.clone(),
             ));
 
