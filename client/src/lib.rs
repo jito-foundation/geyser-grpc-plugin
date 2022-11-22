@@ -17,16 +17,13 @@ pub(crate) mod geyser_proto {
 }
 
 pub fn connect(
+    runtime: Arc<Runtime>,
     geyser_addr: String,
     tls_config: Option<ClientTlsConfig>,
-    max_rooted_slot_distance: u64,
-    max_allowable_missed_heartbeats: usize,
     exit: Arc<AtomicBool>,
 ) -> GeyserConsumer {
-    let rt = Runtime::new().unwrap();
-
     let endpoint = Endpoint::from_str(&geyser_addr).unwrap();
-    let ch = rt.block_on(async {
+    let ch = runtime.block_on(async {
         if let Some(tls) = tls_config {
             endpoint.tls_config(tls).expect("tls_config")
         } else {
@@ -39,11 +36,5 @@ pub fn connect(
 
     let c = GeyserClient::new(ch);
 
-    GeyserConsumer::new(
-        c,
-        rt,
-        max_rooted_slot_distance,
-        max_allowable_missed_heartbeats,
-        exit,
-    )
+    GeyserConsumer::new(c, runtime, exit)
 }
