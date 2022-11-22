@@ -233,7 +233,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         status: SlotStatus,
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
-        info!("Updating slot {:?} at with status {:?}", slot, status);
+        debug!("Updating slot {:?} at with status {:?}", slot, status);
 
         let status = match status {
             SlotStatus::Processed => SlotUpdateStatus::Processed,
