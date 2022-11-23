@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::{Debug, Display, Formatter},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -160,20 +161,47 @@ impl ErrorStatusStreamer for SlotUpdateSubscription {
 
 #[allow(clippy::enum_variant_names)]
 enum SubscriptionAddedEvent {
-    AccountUpdate {
+    AccountUpdateSubscription {
         uuid: Uuid,
         subscription_tx: AccountUpdateTx,
         skip_votes: bool,
     },
-    PartialAccountUpdate {
+    PartialAccountUpdateSubscription {
         uuid: Uuid,
         subscription_tx: PartialAccountUpdateTx,
         skip_votes: bool,
     },
-    SlotUpdate {
+    SlotUpdateSubscription {
         uuid: Uuid,
         subscription_tx: SlotUpdateTx,
     },
+}
+
+impl Debug for SubscriptionAddedEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (sub_name, sub_id) = match self {
+            SubscriptionAddedEvent::AccountUpdateSubscription { uuid, .. } => {
+                ("subscribe_account_update".to_string(), uuid)
+            }
+            SubscriptionAddedEvent::PartialAccountUpdateSubscription { uuid, .. } => {
+                ("subscribe_partial_account_update".to_string(), uuid)
+            }
+            SubscriptionAddedEvent::SlotUpdateSubscription { uuid, .. } => {
+                ("subscribe_slot_update".to_string(), uuid)
+            }
+        };
+        writeln!(
+            f,
+            "subscription type: {}, subscription id: {}",
+            sub_name, sub_id
+        )
+    }
+}
+
+impl Display for SubscriptionAddedEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
+    }
 }
 
 #[allow(clippy::enum_variant_names)]
@@ -181,6 +209,33 @@ enum SubscriptionClosedEvent {
     AccountUpdateSubscription(Uuid),
     PartialAccountUpdateSubscription(Uuid),
     SlotUpdateSubscription(Uuid),
+}
+
+impl Debug for SubscriptionClosedEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (sub_name, sub_id) = match self {
+            SubscriptionClosedEvent::AccountUpdateSubscription(uuid) => {
+                ("subscribe_account_update".to_string(), uuid)
+            }
+            SubscriptionClosedEvent::PartialAccountUpdateSubscription(uuid) => {
+                ("subscribe_partial_account_update".to_string(), uuid)
+            }
+            SubscriptionClosedEvent::SlotUpdateSubscription(uuid) => {
+                ("subscribe_slot_update".to_string(), uuid)
+            }
+        };
+        writeln!(
+            f,
+            "subscription type: {}, subscription id: {}",
+            sub_name, sub_id
+        )
+    }
+}
+
+impl Display for SubscriptionClosedEvent {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Debug::fmt(&self, f)
+    }
 }
 
 #[derive(Error, Debug)]
@@ -286,6 +341,7 @@ impl GeyserService {
                 loop {
                     crossbeam_channel::select! {
                         recv(heartbeat_tick) -> _ => {
+                            debug!("sending heartbeats");
                             let failed_subscription_ids = Self::send_heartbeats(&account_update_subscriptions);
                             Self::drop_subscriptions(&failed_subscription_ids[..], &mut account_update_subscriptions);
 
@@ -293,18 +349,21 @@ impl GeyserService {
                             Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
                         }
                         recv(subscription_added_rx) -> maybe_subscription_added => {
+                            info!("received new subscription");
                             if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions) {
                                 error!("error adding new subscription: {}", e);
                                 return;
                             }
                         },
                         recv(subscription_closed_rx) -> maybe_subscription_closed => {
+                            info!("closing subscription");
                             if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions) {
                                 error!("error closing existing subscription: {}", e);
                                 return;
                             }
                         },
                         recv(account_update_rx) -> maybe_account_update => {
+                            debug!("received account update");
                             match Self::handle_account_update_event(maybe_account_update, &account_update_subscriptions, &partial_account_update_subscriptions) {
                                 Err(e) => {
                                     error!("error handling an account update event: {}", e);
@@ -317,6 +376,7 @@ impl GeyserService {
                             }
                         },
                         recv(slot_update_rx) -> maybe_slot_update => {
+                            debug!("received slot update");
                             match Self::handle_slot_update_event(maybe_slot_update, &slot_update_subscriptions) {
                                 Err(e) => {
                                     error!("error handling a slot update event: {}", e);
@@ -341,8 +401,10 @@ impl GeyserService {
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_added = maybe_subscription_added?;
+        info!("new {} subscription", subscription_added);
+
         match subscription_added {
-            SubscriptionAddedEvent::AccountUpdate {
+            SubscriptionAddedEvent::AccountUpdateSubscription {
                 uuid,
                 subscription_tx,
                 skip_votes,
@@ -355,7 +417,7 @@ impl GeyserService {
                     },
                 );
             }
-            SubscriptionAddedEvent::PartialAccountUpdate {
+            SubscriptionAddedEvent::PartialAccountUpdateSubscription {
                 uuid,
                 subscription_tx,
                 skip_votes,
@@ -368,7 +430,7 @@ impl GeyserService {
                     },
                 );
             }
-            SubscriptionAddedEvent::SlotUpdate {
+            SubscriptionAddedEvent::SlotUpdateSubscription {
                 uuid,
                 subscription_tx,
             } => {
@@ -387,6 +449,8 @@ impl GeyserService {
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_closed = maybe_subscription_closed?;
+        info!("closing {} subscription", subscription_closed);
+
         match subscription_closed {
             SubscriptionClosedEvent::AccountUpdateSubscription(subscription_id) => {
                 let _ = account_update_subscriptions.remove(&subscription_id);
@@ -520,7 +584,7 @@ impl Geyser for GeyserService {
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx
-            .try_send(SubscriptionAddedEvent::AccountUpdate {
+            .try_send(SubscriptionAddedEvent::AccountUpdateSubscription {
                 uuid,
                 subscription_tx,
                 skip_votes: request.into_inner().skip_vote_accounts,
@@ -561,7 +625,7 @@ impl Geyser for GeyserService {
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx
-            .try_send(SubscriptionAddedEvent::PartialAccountUpdate {
+            .try_send(SubscriptionAddedEvent::PartialAccountUpdateSubscription {
                 uuid,
                 subscription_tx,
                 skip_votes: request.into_inner().skip_vote_accounts,
@@ -602,7 +666,7 @@ impl Geyser for GeyserService {
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx
-            .try_send(SubscriptionAddedEvent::SlotUpdate {
+            .try_send(SubscriptionAddedEvent::SlotUpdateSubscription {
                 uuid,
                 subscription_tx,
             })
