@@ -16,22 +16,19 @@ use std::{
     time::Duration,
 };
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Sender, TrySendError};
 use geyser_proto::geyser_client::GeyserClient;
 use log::*;
 use thiserror::Error;
-use tokio::{
-    runtime::Runtime,
-    time::{interval, Instant},
-};
-use tonic::{transport::Channel, Response, Streaming};
+use tokio::time::{interval, Instant};
+use tonic::{transport::Channel, Response, Status};
 
 use crate::{
-    geyser_consumer::GeyserConsumerError::{HeartbeatError, StreamClosed},
+    geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
     geyser_proto,
     geyser_proto::{
         maybe_account_update, maybe_partial_account_update, EmptyRequest, MaybeAccountUpdate,
-        MaybePartialAccountUpdate, SlotUpdate as PbSlotUpdate, SubscribeAccountUpdatesRequest,
+        MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
         SubscribePartialAccountUpdatesRequest,
     },
     types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
@@ -40,14 +37,17 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum GeyserConsumerError {
-    #[error("GrpcError {0}")]
-    GrpcError(#[from] tonic::Status),
+    #[error("ConsumerChannelDisconnected")]
+    ConsumerChannelDisconnected,
 
-    #[error("HeartbeatError")]
-    HeartbeatError,
+    #[error("GrpcError {0}")]
+    GrpcError(#[from] Status),
 
     #[error("MalformedResponse {0}")]
     MalformedResponse(String),
+
+    #[error("MissedHeartbeat")]
+    MissedHeartbeat,
 
     #[error("StaleAccountUpdate update_slot={update_slot:?}, rooted_slot={rooted_slot:?}")]
     StaleAccountUpdate { update_slot: u64, rooted_slot: u64 },
@@ -84,9 +84,6 @@ pub struct GeyserConsumer {
     /// Geyser client.
     client: GeyserClient<Channel>,
 
-    /// Tokio runtime used to wrap async calls.
-    runtime: Arc<Runtime>,
-
     /// Used to discard account writes received out of order.
     account_write_sequences: AccountWriteSeqs,
 
@@ -95,22 +92,17 @@ pub struct GeyserConsumer {
 }
 
 impl GeyserConsumer {
-    pub fn new(
-        client: GeyserClient<Channel>,
-        runtime: Arc<Runtime>,
-        exit: Arc<AtomicBool>,
-    ) -> Self {
+    pub fn new(client: GeyserClient<Channel>, exit: Arc<AtomicBool>) -> Self {
         Self {
             client,
-            runtime,
             account_write_sequences: HashMap::default(),
             exit,
         }
     }
 
-    pub fn subscribe_account_updates(
-        mut self,
-        tx: Sender<Result<AccountUpdate>>,
+    pub async fn consume_account_updates(
+        &self,
+        account_updates_tx: Sender<AccountUpdate>,
         highest_rooted_slot: Arc<AtomicU64>,
         // Oldest slot from root consumer willing to tolerate.
         // e.g.
@@ -122,249 +114,212 @@ impl GeyserConsumer {
         max_allowable_missed_heartbeats: usize,
         skip_vote_accounts: bool,
     ) -> Result<()> {
-        let expected_heartbeat_interval_ms = self
-            .runtime
-            .block_on(async { self.client.get_heartbeat_interval(EmptyRequest {}).await })?
+        let mut c = self.client.clone();
+        let mut account_write_sequences = self.account_write_sequences.clone();
+
+        let expected_heartbeat_interval_ms = c
+            .get_heartbeat_interval(EmptyRequest {})
+            .await?
             .into_inner()
             .heartbeat_interval_ms;
-        let resp = self.runtime.block_on(async {
-            self.client
-                .subscribe_account_updates(SubscribeAccountUpdatesRequest { skip_vote_accounts })
-                .await
-        })?;
 
+        let resp = c
+            .subscribe_account_updates(SubscribeAccountUpdatesRequest { skip_vote_accounts })
+            .await?;
         let oldest_write_slot = extract_highest_write_slot_header(&resp)?;
+        let mut stream = resp.into_inner();
 
-        let stream = resp.into_inner();
-        let _ = self.runtime.spawn(Self::process_account_updates_stream(
-            stream,
-            tx,
-            self.account_write_sequences,
-            highest_rooted_slot,
-            oldest_write_slot,
-            max_rooted_slot_distance,
-            Duration::from_millis(expected_heartbeat_interval_ms),
-            max_allowable_missed_heartbeats,
-            self.exit.clone(),
-        ));
+        let mut latest_write_slot = 0;
+        let mut last_heartbeat = Instant::now();
+        let heartbeat_expiration =
+            expected_heartbeat_interval_ms * max_allowable_missed_heartbeats as u64;
+        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration);
+        let mut expected_heartbeat_interval =
+            interval(Duration::from_millis(expected_heartbeat_interval_ms));
+
+        while !self.exit.load(Ordering::Relaxed) {
+            tokio::select! {
+                now = expected_heartbeat_interval.tick() => {
+                    let heartbeat_expired = now.duration_since(last_heartbeat).gt(&heartbeat_expiration);
+                    if heartbeat_expired {
+                        return Err(MissedHeartbeat);
+                    }
+                }
+                maybe_message = stream.message() => {
+                    if let Some(account_update) = Self::process_account_update(
+                        maybe_message,
+                        &mut account_write_sequences,
+                        &highest_rooted_slot,
+                        &mut last_heartbeat,
+                        oldest_write_slot,
+                        max_rooted_slot_distance,
+                    )? {
+                        latest_write_slot = latest_write_slot.max(account_update.slot);
+                        if let Err(e) = account_updates_tx.try_send(account_update) {
+                            check_try_send_err(e)?;
+                        }
+                    }
+                }
+            }
+        }
 
         Ok(())
     }
 
-    pub fn subscribe_partial_account_updates(
-        mut self,
-        tx: Sender<Result<PartialAccountUpdate>>,
+    pub async fn consume_partial_account_updates(
+        &self,
+        partial_account_updates_tx: Sender<PartialAccountUpdate>,
         highest_rooted_slot: Arc<AtomicU64>,
         max_rooted_slot_distance: u64,
         max_allowable_missed_heartbeats: usize,
         skip_vote_accounts: bool,
     ) -> Result<()> {
-        let expected_heartbeat_interval_ms = self
-            .runtime
-            .block_on(async { self.client.get_heartbeat_interval(EmptyRequest {}).await })?
+        let mut c = self.client.clone();
+        let mut account_write_sequences = self.account_write_sequences.clone();
+
+        let expected_heartbeat_interval_ms = c
+            .get_heartbeat_interval(EmptyRequest {})
+            .await?
             .into_inner()
             .heartbeat_interval_ms;
-        let resp = self.runtime.block_on(async {
-            self.client
-                .subscribe_partial_account_updates(SubscribePartialAccountUpdatesRequest {
-                    skip_vote_accounts,
-                })
-                .await
-        })?;
 
+        let resp = c
+            .subscribe_partial_account_updates(SubscribePartialAccountUpdatesRequest {
+                skip_vote_accounts,
+            })
+            .await?;
         let oldest_write_slot = extract_highest_write_slot_header(&resp)?;
+        let mut stream = resp.into_inner();
 
-        let stream = resp.into_inner();
-        self.runtime
-            .spawn(Self::process_partial_account_updates_stream(
-                stream,
-                tx,
-                self.account_write_sequences,
-                highest_rooted_slot,
-                oldest_write_slot,
-                max_rooted_slot_distance,
-                Duration::from_millis(expected_heartbeat_interval_ms),
-                max_allowable_missed_heartbeats,
-                self.exit.clone(),
-            ));
-
-        Ok(())
-    }
-
-    pub fn subscribe_slot_updates(mut self, tx: Sender<Result<SlotUpdate>>) -> Result<()> {
-        let resp = self
-            .runtime
-            .block_on(async { self.client.subscribe_slot_updates(EmptyRequest {}).await })?;
-
-        let stream = resp.into_inner();
-        self.runtime.spawn(Self::process_slot_updates_stream(
-            stream,
-            tx,
-            self.exit.clone(),
-        ));
-
-        Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn process_account_updates_stream(
-        mut stream: Streaming<MaybeAccountUpdate>,
-        tx: Sender<Result<AccountUpdate>>,
-        mut account_write_sequences: AccountWriteSeqs,
-        highest_rooted_slot: Arc<AtomicU64>,
-        oldest_write_slot: Slot,
-        max_rooted_slot_distance: u64,
-        expected_heartbeat_interval: Duration,
-        max_allowable_missed_heartbeats: usize,
-        exit: Arc<AtomicBool>,
-    ) {
         let mut latest_write_slot = 0;
         let mut last_heartbeat = Instant::now();
-
         let heartbeat_expiration =
-            expected_heartbeat_interval.as_millis() * max_allowable_missed_heartbeats as u128;
-        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration as u64);
-        let mut expected_heartbeat_interval = interval(expected_heartbeat_interval);
+            expected_heartbeat_interval_ms * max_allowable_missed_heartbeats as u64;
+        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration);
+        let mut expected_heartbeat_interval =
+            interval(Duration::from_millis(expected_heartbeat_interval_ms));
 
-        while !exit.load(Ordering::Relaxed) {
+        while !self.exit.load(Ordering::Relaxed) {
             tokio::select! {
                 now = expected_heartbeat_interval.tick() => {
                     let heartbeat_expired = now.duration_since(last_heartbeat).gt(&heartbeat_expiration);
                     if heartbeat_expired {
-                        let _ = tx.try_send(Err(HeartbeatError));
-                        exit.store(true, Ordering::Relaxed);
+                        return Err(MissedHeartbeat);
                     }
                 }
                 maybe_message = stream.message() => {
-                    match maybe_message {
-                        Ok(Some(maybe_update)) => {
-                            match maybe_update.msg {
-                                Some(maybe_account_update::Msg::AccountUpdate(update)) => {
-                                    let mut update: AccountUpdate = update.into();
-                                    if let Err(e) = Self::process_update(
-                                        &mut update,
-                                        &mut account_write_sequences,
-                                        &highest_rooted_slot,
-                                        &mut latest_write_slot,
-                                        max_rooted_slot_distance,
-                                        oldest_write_slot,
-                                    ) {
-                                        error!("error processing update: {:?}", e);
-                                        let _ = tx.try_send(Err(e));
-                                        exit.store(true, Ordering::Relaxed);
-                                    } else {
-                                        let _ = tx.try_send(Ok(update));
-                                    }
-                                },
-                                Some(maybe_account_update::Msg::Hb(_)) => {
-                                    last_heartbeat = Instant::now();
-                                }
-                                _ => {}
-                            }
-                        }
-                        Ok(None) => {
-                            let _ = tx.try_send(Err(StreamClosed));
-                            exit.store(true, Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            let _ = tx.try_send(Err(e.into()));
-                            exit.store(true, Ordering::Relaxed);
+                    if let Some(account_update) = Self::process_partial_account_update(
+                        maybe_message,
+                        &mut account_write_sequences,
+                        &highest_rooted_slot,
+                        &mut last_heartbeat,
+                        oldest_write_slot,
+                        max_rooted_slot_distance,
+                    ).await? {
+                        latest_write_slot = latest_write_slot.max(account_update.slot);
+                        if let Err(e) = partial_account_updates_tx.try_send(account_update) {
+                            check_try_send_err(e)?;
                         }
                     }
                 }
             }
         }
+
+        Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn process_partial_account_updates_stream(
-        mut stream: Streaming<MaybePartialAccountUpdate>,
-        tx: Sender<Result<PartialAccountUpdate>>,
-        mut account_write_sequences: AccountWriteSeqs,
-        highest_rooted_slot: Arc<AtomicU64>,
-        oldest_write_slot: Slot,
-        max_rooted_slot_distance: u64,
-        expected_heartbeat_interval: Duration,
-        max_allowable_missed_heartbeats: usize,
-        exit: Arc<AtomicBool>,
-    ) {
-        let mut latest_write_slot = 0;
-        let mut last_heartbeat = Instant::now();
+    pub async fn consume_slot_updates(&self, slot_updates_tx: Sender<SlotUpdate>) -> Result<()> {
+        let mut c = self.client.clone();
 
-        let heartbeat_expiration =
-            expected_heartbeat_interval.as_millis() * max_allowable_missed_heartbeats as u128;
-        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration as u64);
-        let mut expected_heartbeat_interval = interval(expected_heartbeat_interval);
+        let resp = c.subscribe_slot_updates(EmptyRequest {}).await?;
+        let mut stream = resp.into_inner();
 
-        while !exit.load(Ordering::Relaxed) {
-            tokio::select! {
-                now = expected_heartbeat_interval.tick() => {
-                    let heartbeat_expired = now.duration_since(last_heartbeat).gt(&heartbeat_expiration);
-                    if heartbeat_expired {
-                        let _ = tx.try_send(Err(HeartbeatError));
-                        exit.store(true, Ordering::Relaxed);
-                    }
-                }
-                maybe_message = stream.message() => {
-                    match maybe_message {
-                        Ok(Some(maybe_update)) => {
-                            match maybe_update.msg {
-                                Some(maybe_partial_account_update::Msg::PartialAccountUpdate(update)) => {
-                                    let mut update: PartialAccountUpdate = update.into();
-                                    if let Err(e) = Self::process_update(
-                                        &mut update,
-                                        &mut account_write_sequences,
-                                        &highest_rooted_slot,
-                                        &mut latest_write_slot,
-                                        max_rooted_slot_distance,
-                                        oldest_write_slot,
-                                    ) {
-                                        error!("error processing update: {:?}", e);
-                                        let _ = tx.try_send(Err(e));
-                                        exit.store(true, Ordering::Relaxed);
-                                    } else {
-                                        let _ = tx.try_send(Ok(update));
-                                    }
-                                }
-                                Some(maybe_partial_account_update::Msg::Hb(_)) => {
-                                    last_heartbeat = Instant::now();
-                                }
-                                None => {},
-                            }
-                        }
-                        Ok(None) => {
-                            let _ = tx.try_send(Err(StreamClosed));
-                            exit.store(true, Ordering::Relaxed);
-                        }
-                        Err(e) => {
-                            let _ = tx.try_send(Err(e.into()));
-                            exit.store(true, Ordering::Relaxed);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    async fn process_slot_updates_stream(
-        mut stream: Streaming<PbSlotUpdate>,
-        tx: Sender<Result<SlotUpdate>>,
-        exit: Arc<AtomicBool>,
-    ) {
-        while !exit.load(Ordering::Relaxed) {
+        while !self.exit.load(Ordering::Relaxed) {
             match stream.message().await {
                 Ok(Some(slot_update)) => {
-                    let _ = tx.try_send(Ok(slot_update.into()));
+                    if let Err(e) = slot_updates_tx.try_send(slot_update.into()) {
+                        check_try_send_err(e)?;
+                    };
                 }
-                Ok(None) => {
-                    let _ = tx.try_send(Err(StreamClosed));
-                    exit.store(true, Ordering::Relaxed);
-                }
-                Err(e) => {
-                    let _ = tx.try_send(Err(e.into()));
-                    exit.store(true, Ordering::Relaxed);
-                }
+                Ok(None) => return Err(StreamClosed),
+                Err(e) => return Err(e.into()),
             }
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_account_update(
+        maybe_message: std::result::Result<Option<MaybeAccountUpdate>, Status>,
+        account_write_sequences: &mut AccountWriteSeqs,
+        highest_rooted_slot: &Arc<AtomicU64>,
+        last_heartbeat: &mut Instant,
+        oldest_write_slot: Slot,
+        max_rooted_slot_distance: u64,
+    ) -> Result<Option<AccountUpdate>> {
+        match maybe_message {
+            Ok(Some(maybe_update)) => match maybe_update.msg {
+                Some(maybe_account_update::Msg::AccountUpdate(update)) => {
+                    let mut update: AccountUpdate = update.into();
+                    if let Err(e) = Self::process_update(
+                        &mut update,
+                        account_write_sequences,
+                        highest_rooted_slot,
+                        max_rooted_slot_distance,
+                        oldest_write_slot,
+                    ) {
+                        error!("error processing update: {:?}", e);
+                        Err(e)
+                    } else {
+                        Ok(Some(update))
+                    }
+                }
+                Some(maybe_account_update::Msg::Hb(_)) => {
+                    *last_heartbeat = Instant::now();
+                    Ok(None)
+                }
+                None => unreachable!("msg must be Some"),
+            },
+            Ok(None) => Err(StreamClosed),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn process_partial_account_update(
+        maybe_message: std::result::Result<Option<MaybePartialAccountUpdate>, Status>,
+        account_write_sequences: &mut AccountWriteSeqs,
+        highest_rooted_slot: &Arc<AtomicU64>,
+        last_heartbeat: &mut Instant,
+        oldest_write_slot: Slot,
+        max_rooted_slot_distance: u64,
+    ) -> Result<Option<PartialAccountUpdate>> {
+        match maybe_message {
+            Ok(Some(maybe_update)) => match maybe_update.msg {
+                Some(maybe_partial_account_update::Msg::PartialAccountUpdate(update)) => {
+                    let mut update: PartialAccountUpdate = update.into();
+                    if let Err(e) = Self::process_update(
+                        &mut update,
+                        account_write_sequences,
+                        highest_rooted_slot,
+                        max_rooted_slot_distance,
+                        oldest_write_slot,
+                    ) {
+                        error!("error processing update: {:?}", e);
+                        Err(e)
+                    } else {
+                        Ok(Some(update))
+                    }
+                }
+                Some(maybe_partial_account_update::Msg::Hb(_)) => {
+                    *last_heartbeat = Instant::now();
+                    Ok(None)
+                }
+                None => unreachable!("msg must be Some"),
+            },
+            Ok(None) => Err(StreamClosed),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -372,7 +327,6 @@ impl GeyserConsumer {
         update: &mut A,
         account_write_sequences: &mut AccountWriteSeqs,
         highest_rooted_slot: &Arc<AtomicU64>,
-        latest_write_slot: &mut Slot,
         max_rooted_slot_distance: u64,
         oldest_write_slot: u64,
     ) -> Result<()> {
@@ -384,10 +338,11 @@ impl GeyserConsumer {
             });
         }
 
-        if update_slot > *latest_write_slot {
-            *latest_write_slot = update.slot();
-        } else if update_slot
-            < highest_rooted_slot.load(Ordering::Relaxed) - max_rooted_slot_distance
+        if update_slot
+            < highest_rooted_slot
+                .load(Ordering::Relaxed)
+                .checked_sub(max_rooted_slot_distance)
+                .unwrap_or_default()
         {
             return Err(GeyserConsumerError::StaleAccountUpdate {
                 update_slot,
@@ -439,5 +394,14 @@ fn extract_highest_write_slot_header<T>(resp: &Response<T>) -> Result<Slot> {
             "missing {} header",
             HIGHEST_WRITE_SLOT_HEADER
         )))
+    }
+}
+
+fn check_try_send_err<T>(e: TrySendError<T>) -> Result<()> {
+    if let TrySendError::Full(_) = e {
+        warn!("slow consumer");
+        Ok(())
+    } else {
+        Err(GeyserConsumerError::ConsumerChannelDisconnected)
     }
 }
