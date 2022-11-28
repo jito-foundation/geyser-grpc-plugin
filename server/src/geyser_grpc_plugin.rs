@@ -157,22 +157,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 tx_signature: None,
                 replica_version: 1,
             },
-            ReplicaAccountInfoVersions::V0_0_2(account) => {
-                let tx_signature = account.txn_signature.map(|sig| sig.to_string());
-                AccountUpdate {
-                    slot,
-                    pubkey: account.pubkey.to_vec(),
-                    lamports: account.lamports,
-                    owner: account.owner.to_vec(),
-                    is_executable: account.executable,
-                    rent_epoch: account.rent_epoch,
-                    data: account.data.to_vec(),
-                    seq: account.write_version,
-                    is_startup,
-                    tx_signature,
-                    replica_version: 2,
-                }
-            }
         };
 
         if account_update.pubkey.len() != 32 {
