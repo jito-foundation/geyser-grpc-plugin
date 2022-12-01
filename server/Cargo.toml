@@ -18,11 +18,11 @@ prost = "0.9"
 serde = "1.0.130"
 serde_derive = "1.0.103"
 serde_json = "1.0.67"
-solana-geyser-plugin-interface = "~1.14"
-solana-logger = "~1.14"
-solana-metrics = "~1.14"
-solana-program = "~1.14"
-solana-sdk = "~1.14"
+solana-geyser-plugin-interface = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "v1.14" }
+solana-logger = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "v1.14" }
+solana-metrics = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "v1.14" }
+solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "v1.14" }
+solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", branch = "v1.14" }
 thiserror = "1.0.37"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
