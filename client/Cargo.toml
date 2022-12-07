@@ -16,7 +16,7 @@ rand = "0.7"
 serde = "1.0.130"
 serde_derive = "1.0.130"
 serde_json = "1.0.68"
-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "2f0703" }
+solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", rev = "9d2671" }
 thiserror = "1.0.37"
 tokio = { version = "1", features = ["full"] }
 tonic = { version = "0.6", features = ["tls"] }
