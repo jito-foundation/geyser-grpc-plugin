@@ -8,7 +8,7 @@
 
 use std::{
     collections::HashMap,
-    num::ParseIntError,
+    num::{NonZeroUsize, ParseIntError},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
@@ -19,6 +19,7 @@ use std::{
 use crossbeam::channel::{Sender, TrySendError};
 use geyser_proto::geyser_client::GeyserClient;
 use log::*;
+use lru::LruCache;
 use thiserror::Error;
 use tokio::time::{interval, Instant};
 use tonic::{transport::Channel, Response, Status};
@@ -66,9 +67,12 @@ pub enum GeyserConsumerError {
 
 pub type Result<T> = std::result::Result<T, GeyserConsumerError>;
 
-pub const HIGHEST_WRITE_SLOT_HEADER: &str = "highest-write-slot";
+// Assuming updates are mostly streamed in order, the oldest entry will be ~33 minutes old before it's pruned.
+// This assumes 400ms block times.
+const ACCOUNT_WRITE_SEQS_CACHE_SIZE: usize = 5_000;
+pub type AccountWriteSeqsCache = LruCache<Slot, HashMap<Pubkey, AccountWriteSeq>>;
 
-pub type AccountWriteSeqs = HashMap<Slot, HashMap<Pubkey, AccountWriteSeq>>;
+pub const HIGHEST_WRITE_SLOT_HEADER: &str = "highest-write-slot";
 
 #[derive(Clone)]
 pub struct AccountWriteSeq {
@@ -84,20 +88,13 @@ pub struct GeyserConsumer {
     /// Geyser client.
     client: GeyserClient<Channel>,
 
-    /// Used to discard account writes received out of order.
-    account_write_sequences: AccountWriteSeqs,
-
     /// Exit signal.
     exit: Arc<AtomicBool>,
 }
 
 impl GeyserConsumer {
     pub fn new(client: GeyserClient<Channel>, exit: Arc<AtomicBool>) -> Self {
-        Self {
-            client,
-            account_write_sequences: HashMap::default(),
-            exit,
-        }
+        Self { client, exit }
     }
 
     pub async fn consume_account_updates(
@@ -115,7 +112,8 @@ impl GeyserConsumer {
         skip_vote_accounts: bool,
     ) -> Result<()> {
         let mut c = self.client.clone();
-        let mut account_write_sequences = self.account_write_sequences.clone();
+        let mut account_write_sequences =
+            LruCache::new(NonZeroUsize::new(ACCOUNT_WRITE_SEQS_CACHE_SIZE).unwrap());
 
         let expected_heartbeat_interval_ms = c
             .get_heartbeat_interval(EmptyRequest {})
@@ -175,7 +173,8 @@ impl GeyserConsumer {
         skip_vote_accounts: bool,
     ) -> Result<()> {
         let mut c = self.client.clone();
-        let mut account_write_sequences = self.account_write_sequences.clone();
+        let mut account_write_sequences =
+            LruCache::new(NonZeroUsize::new(ACCOUNT_WRITE_SEQS_CACHE_SIZE).unwrap());
 
         let expected_heartbeat_interval_ms = c
             .get_heartbeat_interval(EmptyRequest {})
@@ -252,7 +251,7 @@ impl GeyserConsumer {
     #[allow(clippy::too_many_arguments)]
     fn process_account_update(
         maybe_message: std::result::Result<Option<MaybeAccountUpdate>, Status>,
-        account_write_sequences: &mut AccountWriteSeqs,
+        account_write_sequences: &mut AccountWriteSeqsCache,
         highest_rooted_slot: &Arc<AtomicU64>,
         last_heartbeat: &mut Instant,
         oldest_write_slot: Slot,
@@ -289,7 +288,7 @@ impl GeyserConsumer {
     #[allow(clippy::too_many_arguments)]
     async fn process_partial_account_update(
         maybe_message: std::result::Result<Option<MaybePartialAccountUpdate>, Status>,
-        account_write_sequences: &mut AccountWriteSeqs,
+        account_write_sequences: &mut AccountWriteSeqsCache,
         highest_rooted_slot: &Arc<AtomicU64>,
         last_heartbeat: &mut Instant,
         oldest_write_slot: Slot,
@@ -325,7 +324,7 @@ impl GeyserConsumer {
 
     fn process_update<A: AccountUpdateNotification>(
         update: &mut A,
-        account_write_sequences: &mut AccountWriteSeqs,
+        account_write_sequences: &mut AccountWriteSeqsCache,
         highest_rooted_slot: &Arc<AtomicU64>,
         max_rooted_slot_distance: u64,
         oldest_write_slot: u64,
@@ -350,7 +349,7 @@ impl GeyserConsumer {
             });
         }
 
-        let update_seqs = account_write_sequences.entry(update_slot).or_default();
+        let update_seqs = account_write_sequences.get_or_insert_mut(update_slot, HashMap::default);
         let account_write_seq = update_seqs
             .entry(update.pubkey())
             .or_insert(AccountWriteSeq {
