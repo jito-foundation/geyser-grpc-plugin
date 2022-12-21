@@ -1,5 +1,5 @@
 {
-        "libpath": "/path/to/docker-output/libgeyser_grpc_plugin_server.so",
+        "libpath": "/path/to/container-output/libgeyser_grpc_plugin_server.so",
         "accounts_selector" : {
                 "owners": ["*"],
                 "accounts": ["*"]
