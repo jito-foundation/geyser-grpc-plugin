@@ -1,26 +1,44 @@
-#!/usr/bin/env sh
-# Builds this program in a docker container.
-# Useful for running on machines that might not have cargo installed but can run docker (Flatcar Linux).
+#!/usr/bin/env bash
+# Builds this program in a container.
+# Useful for running on machines that might not have cargo installed but can run docker/podman (Flatcar Linux).
 set -eux
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 GIT_SHA="$(git describe --always --dirty)"
 
-echo $GIT_SHA
+echo "${GIT_SHA}"
 
-DOCKER_BUILDKIT=1 docker build \
-  --build-arg ci_commit=$GIT_SHA \
+DOCKER_CMD=${DOCKER_CMD:-"docker"}
+PODMAN_CMD=${PODMAN_CMD:-"podman"}
+CONTAINER_CMD="unknown"
+if ! command -v "${PODMAN_CMD}" >/dev/null 2>&1; then
+  if command -v "${DOCKER_CMD}" >/dev/null 2>&1; then
+    export DOCKER_BUILDKIT=1
+    CONTAINER_CMD=${DOCKER_CMD}
+  else
+    echo "could not find a container runtime executeable!"
+    echo "please make sure ${PODMAN_CMD} or ${DOCKER_CMD} is installed and in the path variable."
+    exit 1
+  fi
+else
+  CONTAINER_CMD=${PODMAN_CMD}
+fi
+
+echo "container runtime command is: ${CONTAINER_CMD}"
+
+${CONTAINER_CMD} build \
+  --build-arg ci_commit="$GIT_SHA" \
   -t geyser-grpc-plugin \
   -f Dockerfile . \
   --progress=plain
 
 # Creates a temporary container, copies geyser-grpc-plugin built inside container there and
 # removes the temporary container.
-docker rm temp || true
-docker container create --name temp geyser-grpc-plugin
+${CONTAINER_CMD} rm temp || true
+${CONTAINER_CMD} container create --name temp geyser-grpc-plugin
 
-# Outputs the binary to $SCRIPT_DIR/docker-output
-mkdir -p $SCRIPT_DIR/docker-output
-docker container cp temp:/geyser-grpc-plugin/docker-output $SCRIPT_DIR/
-docker rm temp
+# Outputs the binary to $SCRIPT_DIR/container-output
+mkdir -p "${SCRIPT_DIR}"/container-output
+${CONTAINER_CMD} container cp temp:/geyser-grpc-plugin/container-output "${SCRIPT_DIR}"/
+${CONTAINER_CMD} rm temp
