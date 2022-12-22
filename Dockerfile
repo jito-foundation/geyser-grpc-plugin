@@ -28,7 +28,7 @@ RUN set -x \
 
 WORKDIR /geyser-grpc-plugin
 COPY . .
-RUN mkdir -p docker-output
+RUN mkdir -p container-output
 
 ARG ci_commit
 ENV CI_COMMIT=$ci_commit
@@ -38,4 +38,4 @@ ENV CI_COMMIT=$ci_commit
 RUN --mount=type=cache,mode=0777,target=/geyser-grpc-plugin/target \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/registry \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/git \
-    cargo build --release && cp target/release/libgeyser* ./docker-output
+    cargo build --release && cp target/release/libgeyser* ./container-output
