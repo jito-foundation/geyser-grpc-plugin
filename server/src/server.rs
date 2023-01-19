@@ -635,8 +635,13 @@ impl Geyser for GeyserService {
         let (notification_sender, notification_receiver) =
             channel(self.service_config.subscriber_buffer_size);
 
-        // TODO (LB): check these are valid pubkeys
         let accounts: HashSet<Vec<u8>> = request.into_inner().accounts.into_iter().collect();
+        let all_valid_pubkeys = accounts.iter().all(|a| a.len() == 32);
+        if !all_valid_pubkeys {
+            return Err(Status::invalid_argument(
+                "a pubkey with length != 32 was provided",
+            ));
+        }
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx
@@ -680,8 +685,13 @@ impl Geyser for GeyserService {
         let (notification_sender, notification_receiver) =
             channel(self.service_config.subscriber_buffer_size);
 
-        // TODO (LB): check these are valid pubkeys
         let programs: HashSet<Vec<u8>> = request.into_inner().programs.into_iter().collect();
+        let all_valid_pubkeys = programs.iter().all(|a| a.len() == 32);
+        if !all_valid_pubkeys {
+            return Err(Status::invalid_argument(
+                "a pubkey with length != 32 was provided",
+            ));
+        }
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx

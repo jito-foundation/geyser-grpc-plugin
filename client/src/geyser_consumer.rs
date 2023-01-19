@@ -28,11 +28,10 @@ use crate::{
     geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
     geyser_proto,
     geyser_proto::{
-        maybe_account_update, maybe_partial_account_update, EmptyRequest, MaybeAccountUpdate,
-        MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
+        maybe_partial_account_update, EmptyRequest, MaybePartialAccountUpdate,
         SubscribePartialAccountUpdatesRequest,
     },
-    types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
+    types::{AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
     Pubkey, Slot,
 };
 
@@ -179,43 +178,6 @@ impl GeyserConsumer {
         }
 
         Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn process_account_update(
-        maybe_message: std::result::Result<Option<MaybeAccountUpdate>, Status>,
-        account_write_sequences: &mut AccountWriteSeqsCache,
-        highest_rooted_slot: &Arc<AtomicU64>,
-        last_heartbeat: &mut Instant,
-        oldest_write_slot: Slot,
-        max_rooted_slot_distance: u64,
-    ) -> Result<Option<AccountUpdate>> {
-        match maybe_message {
-            Ok(Some(maybe_update)) => match maybe_update.msg {
-                Some(maybe_account_update::Msg::AccountUpdate(update)) => {
-                    let mut update: AccountUpdate = update.into();
-                    if let Err(e) = Self::process_update(
-                        &mut update,
-                        account_write_sequences,
-                        highest_rooted_slot,
-                        max_rooted_slot_distance,
-                        oldest_write_slot,
-                    ) {
-                        error!("error processing update: {:?}", e);
-                        Err(e)
-                    } else {
-                        Ok(Some(update))
-                    }
-                }
-                Some(maybe_account_update::Msg::Hb(_)) => {
-                    *last_heartbeat = Instant::now();
-                    Ok(None)
-                }
-                None => unreachable!("msg must be Some"),
-            },
-            Ok(None) => Err(StreamClosed),
-            Err(e) => Err(e.into()),
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
