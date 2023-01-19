@@ -974,6 +974,7 @@ dependencies = [
  "solana-metrics",
  "solana-program",
  "solana-sdk",
+ "solana-vote-program",
  "thiserror",
  "tokio",
  "tokio-stream",

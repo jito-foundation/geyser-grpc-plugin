@@ -23,6 +23,7 @@ solana-logger = "~1.14"
 solana-metrics = "~1.14"
 solana-program = "~1.14"
 solana-sdk = "~1.14"
+solana-vote-program = "~1.14"
 thiserror = "1.0.37"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
