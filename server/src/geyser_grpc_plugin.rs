@@ -76,7 +76,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         let config: PluginConfig =
             serde_json::from_str(&buf).map_err(|err| GeyserPluginError::ConfigFileReadError {
-                msg: format!("Error deserializing PluginConfig: {:?}", err),
+                msg: format!("Error deserializing PluginConfig: {err:?}"),
             })?;
 
         let addr =
@@ -84,7 +84,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 .bind_address
                 .parse()
                 .map_err(|err| GeyserPluginError::ConfigFileReadError {
-                    msg: format!("Error parsing the bind_address {:?}", err),
+                    msg: format!("Error parsing the bind_address {err:?}"),
                 })?;
 
         let highest_write_slot = Arc::new(AtomicU64::new(0));

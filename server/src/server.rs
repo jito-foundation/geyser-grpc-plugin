@@ -14,7 +14,6 @@ use crossbeam_channel::{tick, RecvError};
 use log::*;
 use once_cell::sync::OnceCell;
 use serde_derive::Deserialize;
-use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, error::TrySendError as TokioTrySendError, Sender as TokioSender};
 use tonic::{metadata::MetadataValue, Request, Response, Status};
@@ -214,8 +213,7 @@ impl Debug for SubscriptionAddedEvent {
         };
         writeln!(
             f,
-            "subscription type: {}, subscription id: {}",
-            sub_name, sub_id
+            "subscription type: {sub_name}, subscription id: {sub_id}",
         )
     }
 }
@@ -567,12 +565,10 @@ impl GeyserService {
     fn send_heartbeats<S: HeartbeatStreamer>(subscriptions: &HashMap<Uuid, S>) -> Vec<Uuid> {
         let mut failed_subscription_ids = vec![];
         for (sub_id, sub) in subscriptions {
-            match sub.send_heartbeat() {
-                Err(GeyserServiceError::NotificationReceiverDisconnected) => {
-                    warn!("client uuid disconnected: {}", sub_id);
-                    failed_subscription_ids.push(*sub_id);
-                }
-                _ => {}
+            if let Err(GeyserServiceError::NotificationReceiverDisconnected) = sub.send_heartbeat()
+            {
+                warn!("client uuid disconnected: {}", sub_id);
+                failed_subscription_ids.push(*sub_id);
             }
         }
 

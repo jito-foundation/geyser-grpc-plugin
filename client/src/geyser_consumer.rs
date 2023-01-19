@@ -271,22 +271,19 @@ fn extract_highest_write_slot_header<T>(resp: &Response<T>) -> Result<Slot> {
     if let Some(highest_write_slot) = resp.metadata().get(HIGHEST_WRITE_SLOT_HEADER) {
         let highest_write_slot = highest_write_slot.to_str().map_err(|e| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error deserializing {} header: {}",
-                HIGHEST_WRITE_SLOT_HEADER, e
+                "error deserializing {HIGHEST_WRITE_SLOT_HEADER} header: {e:?}",
             ))
         })?;
         let highest_write_slot: Slot = highest_write_slot.parse().map_err(|e: ParseIntError| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error parsing {} header: {}",
-                HIGHEST_WRITE_SLOT_HEADER, e
+                "error parsing {HIGHEST_WRITE_SLOT_HEADER} header: {e:?}",
             ))
         })?;
 
         Ok(highest_write_slot)
     } else {
         Err(GeyserConsumerError::MalformedResponse(format!(
-            "missing {} header",
-            HIGHEST_WRITE_SLOT_HEADER
+            "missing {HIGHEST_WRITE_SLOT_HEADER} header",
         )))
     }
 }
