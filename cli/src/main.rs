@@ -157,8 +157,8 @@ async fn print_account_updates(mut response: Streaming<MaybeAccountUpdate>) {
         let account_update = response
             .message()
             .await
-            .expect("get slot update")
-            .expect("get slot update");
+            .expect("get account update")
+            .expect("get account update");
         match account_update.msg {
             None => {
                 println!("error, exiting...");
