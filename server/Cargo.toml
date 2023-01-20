@@ -2,7 +2,7 @@
 name = "geyser-grpc-plugin-server"
 version = "0.1.0"
 license = "Apache-2.0"
-authors = ["segfaultdoctor <seg@jito.network>"]
+authors = ["Jito Foundation <team@jito.network>"]
 edition = "2021"
 
 [lib]
