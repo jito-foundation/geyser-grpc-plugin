@@ -1,9 +1,5 @@
 FROM rust:1.63.0
 
-# Add Google Protocol Buffers for Libra's metrics library.
-ENV PROTOC_VERSION 3.8.0
-ENV PROTOC_ZIP protoc-$PROTOC_VERSION-linux-x86_64.zip
-
 RUN set -x \
  && apt update \
  && apt install -y \
@@ -19,8 +15,12 @@ RUN set -x \
  && rustup component add rustfmt \
  && rustup component add clippy \
  && rustc --version \
- && cargo --version \
- && curl -OL https://github.com/google/protobuf/releases/download/v$PROTOC_VERSION/$PROTOC_ZIP \
+ && cargo --version
+
+ENV PROTOC_VERSION 21.12
+ENV PROTOC_ZIP protoc-$PROTOC_VERSION-linux-x86_64.zip
+
+RUN curl -OL https://github.com/google/protobuf/releases/download/v$PROTOC_VERSION/$PROTOC_ZIP \
  && unzip -o $PROTOC_ZIP -d /usr/local bin/protoc \
  && unzip -o $PROTOC_ZIP -d /usr/local include/* \
  && rm -f $PROTOC_ZIP
