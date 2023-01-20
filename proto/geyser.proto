@@ -1,13 +1,19 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package geyser;
 
 message Heartbeat {}
 message EmptyRequest {}
 
+
 message SubscribeAccountUpdatesRequest {
-  // If true, will not stream vote account updates.
-  bool skip_vote_accounts = 1;
+  repeated bytes accounts = 1;
+}
+
+message SubscribeProgramsUpdatesRequest {
+  repeated bytes programs = 1;
 }
 
 message SubscribePartialAccountUpdatesRequest {
@@ -38,6 +44,9 @@ message PartialAccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 7;
+
+  // timestamp the message was generated
+  google.protobuf.Timestamp ts = 8;
 }
 
 message AccountUpdate {
@@ -75,6 +84,9 @@ message AccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 11;
+
+  // timestamp the message was generated
+  google.protobuf.Timestamp ts = 12;
 }
 
 enum SlotUpdateStatus {
@@ -87,6 +99,7 @@ message SlotUpdate {
   uint64 slot = 1;
   optional uint64 parent_slot = 2;
   SlotUpdateStatus status = 3;
+  google.protobuf.Timestamp ts = 4;
 }
 
 message MaybeAccountUpdate {
@@ -116,8 +129,12 @@ service Geyser {
 
   // Subscribes to account updates in the accounts database; additionally pings clients with empty heartbeats.
   // Upon initially connecting the client can expect a `highest_write_slot` set in the http headers.
-  // Returns the highest slot seen thus far in the http headers named `highest-write-slot`.
+  // Subscribe to account updates
   rpc SubscribeAccountUpdates(SubscribeAccountUpdatesRequest) returns (stream MaybeAccountUpdate) {}
+
+  // Subscribes to updates given a list of program IDs. When an account update comes in that's owned by a provided
+  // program id, one will receive an update
+  rpc SubscribeProgramUpdates(SubscribeProgramsUpdatesRequest) returns (stream MaybeAccountUpdate) {}
 
   // Functions similarly to `SubscribeAccountUpdates`, but consumes less bandwidth.
   // Returns the highest slot seen thus far in the http headers named `highest-write-slot`.

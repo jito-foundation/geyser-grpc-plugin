@@ -109,7 +109,7 @@ impl GeyserConsumer {
         max_rooted_slot_distance: u64,
         // Maximum number of heartbeats we're willing to consecutively miss before assuming something's wrong.
         max_allowable_missed_heartbeats: usize,
-        skip_vote_accounts: bool,
+        accounts: Vec<Vec<u8>>,
     ) -> Result<()> {
         let mut c = self.client.clone();
         let mut account_write_sequences =
@@ -122,7 +122,7 @@ impl GeyserConsumer {
             .heartbeat_interval_ms;
 
         let resp = c
-            .subscribe_account_updates(SubscribeAccountUpdatesRequest { skip_vote_accounts })
+            .subscribe_account_updates(SubscribeAccountUpdatesRequest { accounts })
             .await?;
         let oldest_write_slot = extract_highest_write_slot_header(&resp)?;
         let mut stream = resp.into_inner();

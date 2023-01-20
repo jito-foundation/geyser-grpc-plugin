@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::SystemTime,
 };
 
 use bs58;
@@ -21,7 +22,6 @@ use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::transport::Server;
 
 use crate::{
-    accounts_selector::AccountsSelector,
     geyser_proto::{geyser_server::GeyserServer, AccountUpdate, SlotUpdate, SlotUpdateStatus},
     server::{GeyserService, GeyserServiceConfig},
 };
@@ -29,7 +29,6 @@ use crate::{
 pub struct PluginData {
     runtime: Runtime,
     server_exit_tx: oneshot::Sender<()>,
-    accounts_selector: AccountsSelector,
 
     /// Where updates are piped thru to the grpc service.
     account_update_tx: Sender<AccountUpdate>,
@@ -76,12 +75,9 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         let mut buf = String::new();
         file.read_to_string(&mut buf)?;
 
-        let result: serde_json::Value = serde_json::from_str(&buf).unwrap();
-        let accounts_selector = AccountsSelector::from(&result["accounts_selector"]);
-
         let config: PluginConfig =
             serde_json::from_str(&buf).map_err(|err| GeyserPluginError::ConfigFileReadError {
-                msg: format!("Error deserializing PluginConfig: {:?}", err),
+                msg: format!("Error deserializing PluginConfig: {err:?}"),
             })?;
 
         let addr =
@@ -89,7 +85,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 .bind_address
                 .parse()
                 .map_err(|err| GeyserPluginError::ConfigFileReadError {
-                    msg: format!("Error parsing the bind_address {:?}", err),
+                    msg: format!("Error parsing the bind_address {err:?}"),
                 })?;
 
         let highest_write_slot = Arc::new(AtomicU64::new(0));
@@ -116,7 +112,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         self.data = Some(PluginData {
             runtime,
             server_exit_tx,
-            accounts_selector,
             account_update_tx,
             slot_update_tx,
             highest_write_slot,
@@ -156,6 +151,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 is_startup,
                 tx_signature: None,
                 replica_version: 1,
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
             },
             ReplicaAccountInfoVersions::V0_0_2(account) => {
                 let tx_signature = account.txn_signature.map(|sig| sig.to_string());
@@ -171,6 +167,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     is_startup,
                     tx_signature,
                     replica_version: 2,
+                    ts: Some(prost_types::Timestamp::from(SystemTime::now())),
                 }
             }
         };
@@ -187,14 +184,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 "bad account owner pubkey length: {}",
                 bs58::encode(account_update.owner).into_string()
             );
-            return Ok(());
-        }
-
-        // Select only accounts configured to look at.
-        let is_selected = data
-            .accounts_selector
-            .is_account_selected(&account_update.pubkey[..], &account_update.owner[..]);
-        if !is_selected {
             return Ok(());
         }
 
@@ -245,6 +234,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             slot,
             parent_slot,
             status: status as i32,
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
         }) {
             Ok(_) => Ok(()),
             Err(TrySendError::Full(_)) => {
@@ -270,35 +260,4 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
     let plugin = GeyserGrpcPlugin::default();
     let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
     Box::into_raw(plugin)
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use serde_json;
-    use solana_program::pubkey::Pubkey;
-
-    use super::*;
-
-    #[test]
-    fn test_accounts_selector_from_config() {
-        let config = "{\"accounts_selector\" : { \
-           \"owners\" : [\"9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin\"] \
-        }}";
-
-        let config: serde_json::Value = serde_json::from_str(config).unwrap();
-        let accounts_selector = AccountsSelector::from(&config["accounts_selector"]);
-
-        assert_eq!(accounts_selector.owners.len(), 1);
-
-        let owners = accounts_selector
-            .owners
-            .into_iter()
-            .collect::<Vec<Vec<u8>>>();
-        let owner = &owners[0];
-        let owner = Pubkey::from(<[u8; 32]>::try_from(owner.as_slice()).unwrap());
-        assert_eq!(
-            owner.to_string(),
-            "9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin"
-        );
-    }
 }

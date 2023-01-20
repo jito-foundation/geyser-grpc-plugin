@@ -1,30 +1,31 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{Debug, Display, Formatter},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
     thread::{Builder, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use crossbeam_channel::tick;
+use crossbeam_channel::{tick, RecvError};
 use log::*;
 use once_cell::sync::OnceCell;
 use serde_derive::Deserialize;
 use thiserror::Error;
-use tokio::sync::mpsc::{channel, Sender as TokioSender};
+use tokio::sync::mpsc::{channel, error::TrySendError as TokioTrySendError, Sender as TokioSender};
 use tonic::{metadata::MetadataValue, Request, Response, Status};
 use uuid::Uuid;
 
 use crate::{
     geyser_proto::{
-        geyser_server::Geyser, maybe_account_update, maybe_partial_account_update, AccountUpdate,
-        EmptyRequest, GetHeartbeatIntervalResponse, Heartbeat, MaybeAccountUpdate,
+        geyser_server::Geyser, maybe_account_update::Msg, maybe_partial_account_update,
+        AccountUpdate, EmptyRequest, GetHeartbeatIntervalResponse, Heartbeat, MaybeAccountUpdate,
         MaybePartialAccountUpdate, PartialAccountUpdate, SlotUpdate,
         SubscribeAccountUpdatesRequest, SubscribePartialAccountUpdatesRequest,
+        SubscribeProgramsUpdatesRequest,
     },
     subscription_stream::{StreamClosedSender, SubscriptionStream},
 };
@@ -37,6 +38,7 @@ pub const HIGHEST_WRITE_SLOT_HEADER: &str = "highest-write-slot";
 struct SubscriptionClosedSender {
     inner: Sender<SubscriptionClosedEvent>,
 }
+
 impl StreamClosedSender<SubscriptionClosedEvent> for SubscriptionClosedSender {
     type Error = crossbeam_channel::TrySendError<SubscriptionClosedEvent>;
 
@@ -45,72 +47,65 @@ impl StreamClosedSender<SubscriptionClosedEvent> for SubscriptionClosedSender {
     }
 }
 
-type AccountUpdateTx = TokioSender<Result<MaybeAccountUpdate, Status>>;
-type PartialAccountUpdateTx = TokioSender<Result<MaybePartialAccountUpdate, Status>>;
-type SlotUpdateTx = TokioSender<Result<SlotUpdate, Status>>;
+type AccountUpdateSender = TokioSender<Result<MaybeAccountUpdate, Status>>;
+type PartialAccountUpdateSender = TokioSender<Result<MaybePartialAccountUpdate, Status>>;
+type SlotUpdateSender = TokioSender<Result<SlotUpdate, Status>>;
 
 trait AccountUpdateStreamer<T> {
-    fn stream_update(&self, update: T) -> GeyserServiceResult<()>;
+    fn stream_update(&self, update: &T) -> GeyserServiceResult<()>;
 }
+
 trait HeartbeatStreamer {
     fn send_heartbeat(&self) -> GeyserServiceResult<()>;
 }
+
 trait ErrorStatusStreamer {
     fn stream_error(&self, status: Status) -> GeyserServiceResult<()>;
 }
 
 struct AccountUpdateSubscription {
-    subscription_tx: AccountUpdateTx,
-    skip_votes: bool,
+    notification_sender: AccountUpdateSender,
+    accounts: HashSet<Vec<u8>>,
 }
-impl AccountUpdateStreamer<AccountUpdate> for AccountUpdateSubscription {
-    fn stream_update(&self, update: AccountUpdate) -> GeyserServiceResult<()> {
-        if self.skip_votes
-            && &update.owner
-                == VOTE_PROGRAM_ID
-                    .get_or_init(|| solana_program::vote::program::id().to_bytes().to_vec())
-        {
-            return Ok(());
-        }
 
-        let update = MaybeAccountUpdate {
-            msg: Some(maybe_account_update::Msg::AccountUpdate(update)),
-        };
-        self.subscription_tx
-            .try_send(Ok(update))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-
-        Ok(())
-    }
-}
 impl HeartbeatStreamer for AccountUpdateSubscription {
     fn send_heartbeat(&self) -> GeyserServiceResult<()> {
-        self.subscription_tx
+        self.notification_sender
             .try_send(Ok(MaybeAccountUpdate {
-                msg: Some(maybe_account_update::Msg::Hb(Heartbeat {})),
+                msg: Some(Msg::Hb(Heartbeat {})),
             }))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
+
 impl ErrorStatusStreamer for AccountUpdateSubscription {
     fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
-        self.subscription_tx
+        self.notification_sender
             .try_send(Err(status))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
 
 struct PartialAccountUpdateSubscription {
-    subscription_tx: PartialAccountUpdateTx,
+    subscription_tx: PartialAccountUpdateSender,
     skip_votes: bool,
 }
+
 impl AccountUpdateStreamer<PartialAccountUpdate> for PartialAccountUpdateSubscription {
-    fn stream_update(&self, update: PartialAccountUpdate) -> GeyserServiceResult<()> {
+    fn stream_update(&self, update: &PartialAccountUpdate) -> GeyserServiceResult<()> {
         if self.skip_votes
-            && &update.owner
-                == VOTE_PROGRAM_ID
+            && update.owner
+                == *VOTE_PROGRAM_ID
                     .get_or_init(|| solana_program::vote::program::id().to_bytes().to_vec())
         {
             return Ok(());
@@ -118,44 +113,62 @@ impl AccountUpdateStreamer<PartialAccountUpdate> for PartialAccountUpdateSubscri
 
         let update = MaybePartialAccountUpdate {
             msg: Some(maybe_partial_account_update::Msg::PartialAccountUpdate(
-                update,
+                update.clone(),
             )),
         };
         self.subscription_tx
             .try_send(Ok(update))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
+
 impl HeartbeatStreamer for PartialAccountUpdateSubscription {
     fn send_heartbeat(&self) -> GeyserServiceResult<()> {
         self.subscription_tx
             .try_send(Ok(MaybePartialAccountUpdate {
                 msg: Some(maybe_partial_account_update::Msg::Hb(Heartbeat {})),
             }))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
+
 impl ErrorStatusStreamer for PartialAccountUpdateSubscription {
     fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
         self.subscription_tx
             .try_send(Err(status))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
 
 struct SlotUpdateSubscription {
-    subscription_tx: SlotUpdateTx,
+    subscription_tx: SlotUpdateSender,
 }
+
 impl ErrorStatusStreamer for SlotUpdateSubscription {
     fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
         self.subscription_tx
             .try_send(Err(status))
-            .map_err(|_| GeyserServiceError::StreamMessageError)?;
-        Ok(())
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
     }
 }
 
@@ -163,17 +176,22 @@ impl ErrorStatusStreamer for SlotUpdateSubscription {
 enum SubscriptionAddedEvent {
     AccountUpdateSubscription {
         uuid: Uuid,
-        subscription_tx: AccountUpdateTx,
-        skip_votes: bool,
+        notification_sender: AccountUpdateSender,
+        accounts: HashSet<Vec<u8>>,
+    },
+    ProgramUpdateSubscription {
+        uuid: Uuid,
+        notification_sender: AccountUpdateSender,
+        programs: HashSet<Vec<u8>>,
     },
     PartialAccountUpdateSubscription {
         uuid: Uuid,
-        subscription_tx: PartialAccountUpdateTx,
+        notification_sender: PartialAccountUpdateSender,
         skip_votes: bool,
     },
     SlotUpdateSubscription {
         uuid: Uuid,
-        subscription_tx: SlotUpdateTx,
+        notification_sender: SlotUpdateSender,
     },
 }
 
@@ -189,11 +207,13 @@ impl Debug for SubscriptionAddedEvent {
             SubscriptionAddedEvent::SlotUpdateSubscription { uuid, .. } => {
                 ("subscribe_slot_update".to_string(), uuid)
             }
+            SubscriptionAddedEvent::ProgramUpdateSubscription { uuid, .. } => {
+                ("program_update_subscribe".to_string(), uuid)
+            }
         };
         writeln!(
             f,
-            "subscription type: {}, subscription id: {}",
-            sub_name, sub_id
+            "subscription type: {sub_name}, subscription id: {sub_id}",
         )
     }
 }
@@ -205,50 +225,26 @@ impl Display for SubscriptionAddedEvent {
 }
 
 #[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
 enum SubscriptionClosedEvent {
     AccountUpdateSubscription(Uuid),
+    ProgramUpdateSubscription(Uuid),
     PartialAccountUpdateSubscription(Uuid),
     SlotUpdateSubscription(Uuid),
 }
 
-impl Debug for SubscriptionClosedEvent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let (sub_name, sub_id) = match self {
-            SubscriptionClosedEvent::AccountUpdateSubscription(uuid) => {
-                ("subscribe_account_update".to_string(), uuid)
-            }
-            SubscriptionClosedEvent::PartialAccountUpdateSubscription(uuid) => {
-                ("subscribe_partial_account_update".to_string(), uuid)
-            }
-            SubscriptionClosedEvent::SlotUpdateSubscription(uuid) => {
-                ("subscribe_slot_update".to_string(), uuid)
-            }
-        };
-        writeln!(
-            f,
-            "subscription type: {}, subscription id: {}",
-            sub_name, sub_id
-        )
-    }
-}
-
-impl Display for SubscriptionClosedEvent {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(&self, f)
-    }
-}
-
 #[derive(Error, Debug)]
 pub enum GeyserServiceError {
-    #[error("CrossbeamError {0}")]
-    CrossbeamRecvError(#[from] crossbeam_channel::RecvError),
+    #[error("GeyserStreamMessageError")]
+    GeyserStreamMessageError(#[from] RecvError),
 
-    #[error("MalformedAccountUpdate {0}")]
-    MalformedAccountUpdate(String),
+    #[error("The receiving side of the channel is full")]
+    NotificationReceiverFull,
 
-    #[error("StreamMessageError")]
-    StreamMessageError,
+    #[error("The receiver is disconnected")]
+    NotificationReceiverDisconnected,
 }
+
 type GeyserServiceResult<T> = Result<T, GeyserServiceError>;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -332,6 +328,8 @@ impl GeyserService {
                 info!("Starting event loop");
                 let mut account_update_subscriptions: HashMap<Uuid, AccountUpdateSubscription> =
                     HashMap::new();
+                let mut program_update_subscriptions: HashMap<Uuid, AccountUpdateSubscription> =
+                    HashMap::new();
                 let mut partial_account_update_subscriptions: HashMap<
                     Uuid,
                     PartialAccountUpdateSubscription,
@@ -347,24 +345,27 @@ impl GeyserService {
 
                             let failed_subscription_ids = Self::send_heartbeats(&partial_account_update_subscriptions);
                             Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
+
+                            let failed_subscription_ids = Self::send_heartbeats(&program_update_subscriptions);
+                            Self::drop_subscriptions(&failed_subscription_ids[..], &mut program_update_subscriptions);
                         }
                         recv(subscription_added_rx) -> maybe_subscription_added => {
                             info!("received new subscription");
-                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions) {
                                 error!("error adding new subscription: {}", e);
                                 return;
                             }
                         },
                         recv(subscription_closed_rx) -> maybe_subscription_closed => {
                             info!("closing subscription");
-                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions) {
                                 error!("error closing existing subscription: {}", e);
                                 return;
                             }
                         },
                         recv(account_update_rx) -> maybe_account_update => {
                             debug!("received account update");
-                            match Self::handle_account_update_event(maybe_account_update, &account_update_subscriptions, &partial_account_update_subscriptions) {
+                            match Self::handle_account_update_event(maybe_account_update, &account_update_subscriptions, &partial_account_update_subscriptions, &program_update_subscriptions) {
                                 Err(e) => {
                                     error!("error handling an account update event: {}", e);
                                     return;
@@ -372,6 +373,7 @@ impl GeyserService {
                                 Ok(failed_subscription_ids) => {
                                     Self::drop_subscriptions(&failed_subscription_ids[..], &mut account_update_subscriptions);
                                     Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut program_update_subscriptions);
                                 },
                             }
                         },
@@ -395,31 +397,32 @@ impl GeyserService {
 
     /// Handles adding new subscriptions.
     fn handle_subscription_added(
-        maybe_subscription_added: Result<SubscriptionAddedEvent, crossbeam_channel::RecvError>,
+        maybe_subscription_added: Result<SubscriptionAddedEvent, RecvError>,
         account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
+        program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_added = maybe_subscription_added?;
-        info!("new {} subscription", subscription_added);
+        info!("new subscription: {:?}", subscription_added);
 
         match subscription_added {
             SubscriptionAddedEvent::AccountUpdateSubscription {
                 uuid,
-                subscription_tx,
-                skip_votes,
+                notification_sender: subscription_tx,
+                accounts,
             } => {
                 account_update_subscriptions.insert(
                     uuid,
                     AccountUpdateSubscription {
-                        subscription_tx,
-                        skip_votes,
+                        notification_sender: subscription_tx,
+                        accounts,
                     },
                 );
             }
             SubscriptionAddedEvent::PartialAccountUpdateSubscription {
                 uuid,
-                subscription_tx,
+                notification_sender: subscription_tx,
                 skip_votes,
             } => {
                 partial_account_update_subscriptions.insert(
@@ -432,9 +435,22 @@ impl GeyserService {
             }
             SubscriptionAddedEvent::SlotUpdateSubscription {
                 uuid,
-                subscription_tx,
+                notification_sender: subscription_tx,
             } => {
                 slot_update_subscriptions.insert(uuid, SlotUpdateSubscription { subscription_tx });
+            }
+            SubscriptionAddedEvent::ProgramUpdateSubscription {
+                uuid,
+                notification_sender,
+                programs,
+            } => {
+                program_update_subscriptions.insert(
+                    uuid,
+                    AccountUpdateSubscription {
+                        notification_sender,
+                        accounts: programs,
+                    },
+                );
             }
         }
 
@@ -443,13 +459,14 @@ impl GeyserService {
 
     /// Handles closing existing subscriptions.
     fn handle_subscription_closed(
-        maybe_subscription_closed: Result<SubscriptionClosedEvent, crossbeam_channel::RecvError>,
+        maybe_subscription_closed: Result<SubscriptionClosedEvent, RecvError>,
         account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
+        program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_closed = maybe_subscription_closed?;
-        info!("closing {} subscription", subscription_closed);
+        info!("closing subscription: {:?}", subscription_closed);
 
         match subscription_closed {
             SubscriptionClosedEvent::AccountUpdateSubscription(subscription_id) => {
@@ -461,6 +478,9 @@ impl GeyserService {
             SubscriptionClosedEvent::SlotUpdateSubscription(subscription_id) => {
                 let _ = slot_update_subscriptions.remove(&subscription_id);
             }
+            SubscriptionClosedEvent::ProgramUpdateSubscription(subscription_id) => {
+                let _ = program_update_subscriptions.remove(&subscription_id);
+            }
         }
 
         Ok(())
@@ -468,63 +488,87 @@ impl GeyserService {
 
     /// Streams account updates to subscribers.
     fn handle_account_update_event(
-        maybe_account_update: Result<AccountUpdate, crossbeam_channel::RecvError>,
+        maybe_account_update: Result<AccountUpdate, RecvError>,
         account_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &HashMap<Uuid, PartialAccountUpdateSubscription>,
+        program_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
     ) -> GeyserServiceResult<Vec<Uuid>> {
         let account_update = maybe_account_update?;
 
-        let mut failed_subscription_ids = vec![];
-
-        let messages = (0..account_update_subscriptions.len())
-            .map(|_| account_update.clone())
-            .collect::<Vec<_>>();
-        failed_subscription_ids.extend(Self::send_account_update_messages(
-            account_update_subscriptions,
-            messages,
-        ));
-
-        let messages = (0..partial_account_update_subscriptions.len())
-            .map(|_| PartialAccountUpdate {
-                slot: account_update.slot,
-                pubkey: account_update.pubkey.clone(),
-                owner: account_update.owner.clone(),
-                is_startup: account_update.is_startup,
-                seq: account_update.seq,
-                tx_signature: account_update.tx_signature.clone(),
-                replica_version: account_update.replica_version,
+        let failed_account_update_sends: Vec<Uuid> = account_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if sub.accounts.contains(account_update.pubkey.as_slice())
+                    && matches!(
+                        sub.notification_sender.try_send(Ok(MaybeAccountUpdate {
+                            msg: Some(Msg::AccountUpdate(account_update.clone())),
+                        })),
+                        Err(TokioTrySendError::Closed(_))
+                    )
+                {
+                    Some(*uuid)
+                } else {
+                    None
+                }
             })
-            .collect::<Vec<_>>();
-        failed_subscription_ids.extend(Self::send_account_update_messages(
-            partial_account_update_subscriptions,
-            messages,
-        ));
+            .collect();
 
-        Ok(failed_subscription_ids)
-    }
+        let failed_program_update_sends: Vec<Uuid> = program_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if sub.accounts.contains(account_update.owner.as_slice())
+                    && matches!(
+                        sub.notification_sender.try_send(Ok(MaybeAccountUpdate {
+                            msg: Some(Msg::AccountUpdate(account_update.clone())),
+                        })),
+                        Err(TokioTrySendError::Closed(_))
+                    )
+                {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-    fn send_account_update_messages<S: AccountUpdateStreamer<T>, T>(
-        subscriptions: &HashMap<Uuid, S>,
-        updates: Vec<T>,
-    ) -> Vec<Uuid> {
-        assert_eq!(subscriptions.len(), updates.len());
+        let partial_account_update = PartialAccountUpdate {
+            slot: account_update.slot,
+            pubkey: account_update.pubkey,
+            owner: account_update.owner,
+            is_startup: account_update.is_startup,
+            seq: account_update.seq,
+            tx_signature: account_update.tx_signature,
+            replica_version: account_update.replica_version,
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+        };
 
-        let mut failed_subscription_ids = vec![];
-        for (sub, update) in subscriptions.iter().zip(updates) {
-            if let Err(e) = sub.1.stream_update(update) {
-                warn!("error sending message to client: {}", e);
-                failed_subscription_ids.push(*sub.0);
-            }
-        }
+        let failed_partial_account_update_sends: Vec<Uuid> = partial_account_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.stream_update(&partial_account_update),
+                    Err(GeyserServiceError::NotificationReceiverDisconnected)
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
-        failed_subscription_ids
+        Ok(failed_account_update_sends
+            .into_iter()
+            .chain(failed_partial_account_update_sends.into_iter())
+            .chain(failed_program_update_sends.into_iter())
+            .collect())
     }
 
     fn send_heartbeats<S: HeartbeatStreamer>(subscriptions: &HashMap<Uuid, S>) -> Vec<Uuid> {
         let mut failed_subscription_ids = vec![];
         for (sub_id, sub) in subscriptions {
-            if let Err(e) = sub.send_heartbeat() {
-                warn!("error sending heartbeat to client: {}", e);
+            if let Err(GeyserServiceError::NotificationReceiverDisconnected) = sub.send_heartbeat()
+            {
+                warn!("client uuid disconnected: {}", sub_id);
                 failed_subscription_ids.push(*sub_id);
             }
         }
@@ -532,20 +576,26 @@ impl GeyserService {
         failed_subscription_ids
     }
 
-    /// Streams slot updates to subscribers.
+    /// Streams slot updates to subscribers
+    /// Returns a vector of UUIDs that failed to send to due to the subscription being closed
     fn handle_slot_update_event(
-        maybe_slot_update: Result<SlotUpdate, crossbeam_channel::RecvError>,
+        maybe_slot_update: Result<SlotUpdate, RecvError>,
         slot_update_subscriptions: &HashMap<Uuid, SlotUpdateSubscription>,
     ) -> GeyserServiceResult<Vec<Uuid>> {
         let slot_update = maybe_slot_update?;
-        let mut failed_subscription_ids = vec![];
-
-        for (sub_id, sub) in slot_update_subscriptions {
-            if let Err(e) = sub.subscription_tx.try_send(Ok(slot_update.clone())) {
-                warn!("error sending slot_update to client: {}", e);
-                failed_subscription_ids.push(*sub_id)
-            }
-        }
+        let failed_subscription_ids = slot_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.subscription_tx.try_send(Ok(slot_update.clone())),
+                    Err(TokioTrySendError::Closed(_))
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
 
         Ok(failed_subscription_ids)
     }
@@ -579,15 +629,23 @@ impl Geyser for GeyserService {
         &self,
         request: Request<SubscribeAccountUpdatesRequest>,
     ) -> Result<Response<Self::SubscribeAccountUpdatesStream>, Status> {
-        let (subscription_tx, subscription_rx) =
+        let (notification_sender, notification_receiver) =
             channel(self.service_config.subscriber_buffer_size);
+
+        let accounts: HashSet<Vec<u8>> = request.into_inner().accounts.into_iter().collect();
+        let all_valid_pubkeys = accounts.iter().all(|a| a.len() == 32);
+        if !all_valid_pubkeys {
+            return Err(Status::invalid_argument(
+                "a pubkey with length != 32 was provided",
+            ));
+        }
 
         let uuid = Uuid::new_v4();
         self.subscription_added_tx
             .try_send(SubscriptionAddedEvent::AccountUpdateSubscription {
                 uuid,
-                subscription_tx,
-                skip_votes: request.into_inner().skip_vote_accounts,
+                notification_sender,
+                accounts,
             })
             .map_err(|e| {
                 error!(
@@ -598,13 +656,63 @@ impl Geyser for GeyserService {
             })?;
 
         let stream = SubscriptionStream::new(
-            subscription_rx,
+            notification_receiver,
             uuid,
             (
                 self.subscription_closed_sender.clone(),
                 SubscriptionClosedEvent::AccountUpdateSubscription(uuid),
             ),
             "subscribe_account_updates",
+        );
+        let mut resp = Response::new(stream);
+        resp.metadata_mut().insert(
+            HIGHEST_WRITE_SLOT_HEADER,
+            MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
+        );
+
+        Ok(resp)
+    }
+
+    type SubscribeProgramUpdatesStream = SubscriptionStream<Uuid, MaybeAccountUpdate>;
+
+    async fn subscribe_program_updates(
+        &self,
+        request: Request<SubscribeProgramsUpdatesRequest>,
+    ) -> Result<Response<Self::SubscribeProgramUpdatesStream>, Status> {
+        let (notification_sender, notification_receiver) =
+            channel(self.service_config.subscriber_buffer_size);
+
+        let programs: HashSet<Vec<u8>> = request.into_inner().programs.into_iter().collect();
+        let all_valid_pubkeys = programs.iter().all(|a| a.len() == 32);
+        if !all_valid_pubkeys {
+            return Err(Status::invalid_argument(
+                "a pubkey with length != 32 was provided",
+            ));
+        }
+
+        let uuid = Uuid::new_v4();
+        self.subscription_added_tx
+            .try_send(SubscriptionAddedEvent::ProgramUpdateSubscription {
+                uuid,
+                notification_sender,
+                programs,
+            })
+            .map_err(|e| {
+                error!(
+                    "failed to add subscribe_account_updates subscription: {}",
+                    e
+                );
+                Status::internal("error adding subscription")
+            })?;
+
+        let stream = SubscriptionStream::new(
+            notification_receiver,
+            uuid,
+            (
+                self.subscription_closed_sender.clone(),
+                SubscriptionClosedEvent::ProgramUpdateSubscription(uuid),
+            ),
+            "subscribe_program_updates",
         );
         let mut resp = Response::new(stream);
         resp.metadata_mut().insert(
@@ -627,7 +735,7 @@ impl Geyser for GeyserService {
         self.subscription_added_tx
             .try_send(SubscriptionAddedEvent::PartialAccountUpdateSubscription {
                 uuid,
-                subscription_tx,
+                notification_sender: subscription_tx,
                 skip_votes: request.into_inner().skip_vote_accounts,
             })
             .map_err(|e| {
@@ -668,7 +776,7 @@ impl Geyser for GeyserService {
         self.subscription_added_tx
             .try_send(SubscriptionAddedEvent::SlotUpdateSubscription {
                 uuid,
-                subscription_tx,
+                notification_sender: subscription_tx,
             })
             .map_err(|e| {
                 error!("failed to add subscribe_slot_updates subscription: {}", e);
