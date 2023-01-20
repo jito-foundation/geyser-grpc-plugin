@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 clap = { version = "4.0.32", features = ["derive", "env"] }
 tonic = { version = "0.8.3", features = ["tls", "tls-roots", "tls-webpki-roots"] }
-geyser-grpc-plugin-client = { git = "https://github.com/jito-foundation/geyser-grpc-plugin.git", branch = "master" }
+geyser-grpc-plugin-client = { path = "../client" }
 tokio = { version = "1.14.1", features = ["full"] }
 futures-util = "0.3.25"
 uuid = { version = "1.2.2", features = ["v4"] }
