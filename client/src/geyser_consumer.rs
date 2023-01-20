@@ -28,10 +28,11 @@ use crate::{
     geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
     geyser_proto,
     geyser_proto::{
-        maybe_partial_account_update, EmptyRequest, MaybePartialAccountUpdate,
+        maybe_account_update, maybe_partial_account_update, EmptyRequest, MaybeAccountUpdate,
+        MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
         SubscribePartialAccountUpdatesRequest,
     },
-    types::{AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
+    types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
     Pubkey, Slot,
 };
 
@@ -94,6 +95,73 @@ pub struct GeyserConsumer {
 impl GeyserConsumer {
     pub fn new(client: GeyserClient<Channel>, exit: Arc<AtomicBool>) -> Self {
         Self { client, exit }
+    }
+
+    pub async fn consume_account_updates(
+        &self,
+        account_updates_tx: Sender<AccountUpdate>,
+        highest_rooted_slot: Arc<AtomicU64>,
+        // Oldest slot from root consumer willing to tolerate.
+        // e.g.
+        //    current slot = 12, max_rooted_slot_distance = 6
+        //    new slot = 13
+        //    new slot = 6 -> Error
+        max_rooted_slot_distance: u64,
+        // Maximum number of heartbeats we're willing to consecutively miss before assuming something's wrong.
+        max_allowable_missed_heartbeats: usize,
+        accounts: Vec<Vec<u8>>,
+    ) -> Result<()> {
+        let mut c = self.client.clone();
+        let mut account_write_sequences =
+            LruCache::new(NonZeroUsize::new(ACCOUNT_WRITE_SEQS_CACHE_SIZE).unwrap());
+
+        let expected_heartbeat_interval_ms = c
+            .get_heartbeat_interval(EmptyRequest {})
+            .await?
+            .into_inner()
+            .heartbeat_interval_ms;
+
+        let resp = c
+            .subscribe_account_updates(SubscribeAccountUpdatesRequest { accounts })
+            .await?;
+        let oldest_write_slot = extract_highest_write_slot_header(&resp)?;
+        let mut stream = resp.into_inner();
+
+        let mut latest_write_slot = 0;
+        let mut last_heartbeat = Instant::now();
+        let heartbeat_expiration =
+            expected_heartbeat_interval_ms * max_allowable_missed_heartbeats as u64;
+        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration);
+        let mut expected_heartbeat_interval =
+            interval(Duration::from_millis(expected_heartbeat_interval_ms));
+
+        while !self.exit.load(Ordering::Relaxed) {
+            tokio::select! {
+                now = expected_heartbeat_interval.tick() => {
+                    let heartbeat_expired = now.duration_since(last_heartbeat).gt(&heartbeat_expiration);
+                    if heartbeat_expired {
+                        return Err(MissedHeartbeat);
+                    }
+                }
+                maybe_message = stream.message() => {
+                    if let Some(account_update) = Self::process_account_update(
+                        maybe_message,
+                        &mut account_write_sequences,
+                        &highest_rooted_slot,
+                        &mut last_heartbeat,
+                        oldest_write_slot,
+                        max_rooted_slot_distance,
+                    )? {
+                        latest_write_slot = latest_write_slot.max(account_update.slot);
+                        if let Err(e) = account_updates_tx.try_send(account_update) {
+                            check_try_send_err(e)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub async fn consume_partial_account_updates(
@@ -178,6 +246,43 @@ impl GeyserConsumer {
         }
 
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_account_update(
+        maybe_message: std::result::Result<Option<MaybeAccountUpdate>, Status>,
+        account_write_sequences: &mut AccountWriteSeqsCache,
+        highest_rooted_slot: &Arc<AtomicU64>,
+        last_heartbeat: &mut Instant,
+        oldest_write_slot: Slot,
+        max_rooted_slot_distance: u64,
+    ) -> Result<Option<AccountUpdate>> {
+        match maybe_message {
+            Ok(Some(maybe_update)) => match maybe_update.msg {
+                Some(maybe_account_update::Msg::AccountUpdate(update)) => {
+                    let mut update: AccountUpdate = update.into();
+                    if let Err(e) = Self::process_update(
+                        &mut update,
+                        account_write_sequences,
+                        highest_rooted_slot,
+                        max_rooted_slot_distance,
+                        oldest_write_slot,
+                    ) {
+                        error!("error processing update: {:?}", e);
+                        Err(e)
+                    } else {
+                        Ok(Some(update))
+                    }
+                }
+                Some(maybe_account_update::Msg::Hb(_)) => {
+                    *last_heartbeat = Instant::now();
+                    Ok(None)
+                }
+                None => unreachable!("msg must be Some"),
+            },
+            Ok(None) => Err(StreamClosed),
+            Err(e) => Err(e.into()),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -271,19 +376,22 @@ fn extract_highest_write_slot_header<T>(resp: &Response<T>) -> Result<Slot> {
     if let Some(highest_write_slot) = resp.metadata().get(HIGHEST_WRITE_SLOT_HEADER) {
         let highest_write_slot = highest_write_slot.to_str().map_err(|e| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error deserializing {HIGHEST_WRITE_SLOT_HEADER} header: {e:?}",
+                "error deserializing {} header: {}",
+                HIGHEST_WRITE_SLOT_HEADER, e
             ))
         })?;
         let highest_write_slot: Slot = highest_write_slot.parse().map_err(|e: ParseIntError| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error parsing {HIGHEST_WRITE_SLOT_HEADER} header: {e:?}",
+                "error parsing {} header: {}",
+                HIGHEST_WRITE_SLOT_HEADER, e
             ))
         })?;
 
         Ok(highest_write_slot)
     } else {
         Err(GeyserConsumerError::MalformedResponse(format!(
-            "missing {HIGHEST_WRITE_SLOT_HEADER} header",
+            "missing {} header",
+            HIGHEST_WRITE_SLOT_HEADER
         )))
     }
 }

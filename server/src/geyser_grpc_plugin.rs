@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
+    time::SystemTime,
 };
 
 use bs58;
@@ -150,6 +151,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 is_startup,
                 tx_signature: None,
                 replica_version: 1,
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
             },
             ReplicaAccountInfoVersions::V0_0_2(account) => {
                 let tx_signature = account.txn_signature.map(|sig| sig.to_string());
@@ -165,6 +167,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     is_startup,
                     tx_signature,
                     replica_version: 2,
+                    ts: Some(prost_types::Timestamp::from(SystemTime::now())),
                 }
             }
         };
@@ -231,6 +234,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             slot,
             parent_slot,
             status: status as i32,
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
         }) {
             Ok(_) => Ok(()),
             Err(TrySendError::Full(_)) => {

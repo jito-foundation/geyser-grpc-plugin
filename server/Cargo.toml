@@ -12,9 +12,11 @@ crate-type = ["cdylib", "rlib"]
 bs58 = "0.4.0"
 crossbeam = "0.8.2"
 crossbeam-channel = "0.5.6"
+futures-util = "0.3.25"
 log = "0.4.14"
 once_cell = "1.16.0"
-prost = "0.9"
+prost = "0.11.6"
+prost-types = "0.11.6"
 serde = "1.0.130"
 serde_derive = "1.0.103"
 serde_json = "1.0.67"
@@ -27,11 +29,11 @@ solana-vote-program = "~1.14"
 thiserror = "1.0.37"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 tokio-stream = "0.1"
-tonic = "0.6"
+tonic = "0.8.3"
 uuid = { version = "1.2.2", features = ["v4", "fast-rng"] }
 
 [build-dependencies]
-tonic-build = "0.6"
+tonic-build = "0.8.4"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

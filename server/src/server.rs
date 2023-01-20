@@ -6,7 +6,7 @@ use std::{
         Arc,
     },
     thread::{Builder, JoinHandle},
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
@@ -539,6 +539,7 @@ impl GeyserService {
             seq: account_update.seq,
             tx_signature: account_update.tx_signature,
             replica_version: account_update.replica_version,
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
         };
 
         let failed_partial_account_update_sends: Vec<Uuid> = partial_account_update_subscriptions

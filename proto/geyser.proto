@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+import "google/protobuf/timestamp.proto";
+
 package geyser;
 
 message Heartbeat {}
@@ -42,6 +44,9 @@ message PartialAccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 7;
+
+  // timestamp the message was generated
+  google.protobuf.Timestamp ts = 8;
 }
 
 message AccountUpdate {
@@ -79,6 +84,9 @@ message AccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 11;
+
+  // timestamp the message was generated
+  google.protobuf.Timestamp ts = 12;
 }
 
 enum SlotUpdateStatus {
@@ -91,6 +99,7 @@ message SlotUpdate {
   uint64 slot = 1;
   optional uint64 parent_slot = 2;
   SlotUpdateStatus status = 3;
+  google.protobuf.Timestamp ts = 4;
 }
 
 message MaybeAccountUpdate {
