@@ -1,4 +1,4 @@
-FROM rust:1.63.0
+FROM rust:1.64.0
 
 RUN set -x \
  && apt update \
@@ -33,9 +33,15 @@ RUN mkdir -p container-output
 ARG ci_commit
 ENV CI_COMMIT=$ci_commit
 
+ARG features
+
 # Uses docker buildkit to cache the image.
 # /usr/local/cargo/git needed for crossbeam patch
 RUN --mount=type=cache,mode=0777,target=/geyser-grpc-plugin/target \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/registry \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/git \
-    cargo build --release && cp target/release/libgeyser* ./container-output
+    if [ -z "$features" ] ; then \
+      cargo build --release && cp target/release/libgeyser* ./container-output; \
+    else \
+      cargo build --release --features "$features" && cp target/release/libgeyser* ./container-output; \
+    fi
