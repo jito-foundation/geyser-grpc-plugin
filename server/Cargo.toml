@@ -21,19 +21,20 @@ serde = "1.0.130"
 serde_derive = "1.0.103"
 serde_json = "1.0.67"
 
-jito-solana-geyser-plugin-interface = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-geyser-plugin-interface", optional = true }
-jito-solana-logger = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-logger", optional = true }
-jito-solana-metrics = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-metrics", optional = true }
-jito-solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-program", optional = true }
-jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-sdk", optional = true }
-jito-solana-vote-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-vote-program", optional = true }
+jito-solana-geyser-plugin-interface = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-geyser-plugin-interface", optional = true }
 
-solana-geyser-plugin-interface = "~1.14"
-solana-logger = "~1.14"
-solana-metrics = "~1.14"
-solana-program = "~1.14"
-solana-sdk = "~1.14"
-solana-vote-program = "~1.14"
+jito-solana-logger = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-logger", optional = true }
+jito-solana-metrics = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-metrics", optional = true }
+jito-solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-program", optional = true }
+jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-sdk", optional = true }
+jito-solana-vote-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-vote-program", optional = true }
+
+solana-geyser-plugin-interface = "~1.13"
+solana-logger = "~1.13"
+solana-metrics = "~1.13"
+solana-program = "~1.13"
+solana-sdk = "~1.13"
+solana-vote-program = "~1.13"
 
 thiserror = "1.0.37"
 tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "sync", "time"] }

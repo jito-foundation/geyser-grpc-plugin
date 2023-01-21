@@ -13,5 +13,5 @@ geyser-grpc-plugin-client = { path = "../client" }
 tokio = { version = "1.14.1", features = ["full"] }
 futures-util = "0.3.25"
 uuid = { version = "1.2.2", features = ["v4"] }
-solana-sdk = "1.14.13"
+solana-sdk = "~1.13"
 prost-types = "0.11.6"
