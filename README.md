@@ -1,4 +1,5 @@
 # geyser-grpc-plugin
+**NOTE**: Be sure to use the branch matching the major & minor versions of your RPC node.
 
 A lightweight gRPC service for streaming account and slot updates to subscribers.
 
