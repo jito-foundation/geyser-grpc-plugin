@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     str::FromStr,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -153,6 +154,10 @@ fn calc_skew(ts: &Timestamp) -> f64 {
 }
 
 async fn print_account_updates(mut response: Streaming<MaybeAccountUpdate>) {
+    let mut max_skew = 0.0;
+    let mut total_skew = 0.0;
+    let mut num_received = 0;
+
     loop {
         let account_update = response
             .message()
@@ -166,12 +171,18 @@ async fn print_account_updates(mut response: Streaming<MaybeAccountUpdate>) {
             }
             Some(Msg::AccountUpdate(update)) => {
                 let skew = calc_skew(&update.ts.unwrap());
+                max_skew = if skew >= max_skew { skew } else { max_skew };
+                total_skew += skew;
+                num_received += 1;
+
                 println!(
-                    "# {:?} slot: {:?} pubkey: {:?} clock skew: {:.3}s",
+                    "# {:?} slot: {:?} pubkey: {:?} clock skew: {:.3}s max_skew: {:.4}, avg_skew: {:.4}",
                     update.seq,
                     update.slot,
                     Pubkey::new(update.pubkey.as_slice()),
-                    skew
+                    skew,
+                    max_skew,
+                    total_skew / num_received as f64
                 );
             }
             Some(Msg::Hb(_)) => {
