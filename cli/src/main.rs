@@ -28,8 +28,9 @@ struct Args {
     #[clap(long, env, required = false)]
     access_token: Uuid,
 
+    /// Subcommand to run
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -89,8 +90,7 @@ async fn main() {
     let mut client = GeyserClient::with_interceptor(channel, interceptor);
 
     match args.command {
-        None => {}
-        Some(Commands::Slots {}) => {
+        Commands::Slots => {
             let mut stream = client
                 .subscribe_slot_updates(EmptyRequest {})
                 .await
@@ -112,7 +112,7 @@ async fn main() {
                 }
             }
         }
-        Some(Commands::Programs { programs: accounts }) => {
+        Commands::Programs { programs: accounts } => {
             println!("subscribing to programs: {:?}", accounts);
             let response = client
                 .subscribe_program_updates(SubscribeProgramsUpdatesRequest {
@@ -126,7 +126,7 @@ async fn main() {
                 .into_inner();
             print_account_updates(response).await;
         }
-        Some(Commands::Accounts { accounts }) => {
+        Commands::Accounts { accounts } => {
             println!("subscribing to accounts: {:?}", accounts);
             let response = client
                 .subscribe_account_updates(SubscribeAccountUpdatesRequest {
