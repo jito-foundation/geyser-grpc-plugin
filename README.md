@@ -48,4 +48,4 @@ Clients using this consumer can expect the following:
 For your convenience:
 
 * Run `./s` script to rsync to a server.
-* Run `./f` to build the binary within a container and spit out to a `container-output` folder.
+* Run `./f` to build the binary within a container and spit out to a `container-output` folder. Run `./f jito-solana` if you plan on running it with a `jito-solana` node. Be sure to use the same `rustc` version used to build your RPC node as was used to build this.
