@@ -16,7 +16,11 @@ use std::{
     time::Duration,
 };
 
-use geyser_proto::geyser_client::GeyserClient;
+use jito_geyser_protos::solana::geyser::{
+    geyser_client::GeyserClient, maybe_partial_account_update, EmptyRequest,
+    MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
+    SubscribePartialAccountUpdatesRequest, SubscribeSlotUpdateRequest, TimestampedAccountUpdate,
+};
 use log::*;
 use lru::LruCache;
 use thiserror::Error;
@@ -28,12 +32,6 @@ use tonic::{transport::Channel, Response, Status};
 
 use crate::{
     geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
-    geyser_proto,
-    geyser_proto::{
-        maybe_account_update, maybe_partial_account_update, EmptyRequest, MaybeAccountUpdate,
-        MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
-        SubscribePartialAccountUpdatesRequest,
-    },
     types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
     Pubkey, Slot,
 };
@@ -109,19 +107,11 @@ impl GeyserConsumer {
         //    new slot = 13
         //    new slot = 6 -> Error
         max_rooted_slot_distance: u64,
-        // Maximum number of heartbeats we're willing to consecutively miss before assuming something's wrong.
-        max_allowable_missed_heartbeats: usize,
         accounts: Vec<Vec<u8>>,
     ) -> Result<()> {
         let mut c = self.client.clone();
         let mut account_write_sequences =
             LruCache::new(NonZeroUsize::new(ACCOUNT_WRITE_SEQS_CACHE_SIZE).unwrap());
-
-        let expected_heartbeat_interval_ms = c
-            .get_heartbeat_interval(EmptyRequest {})
-            .await?
-            .into_inner()
-            .heartbeat_interval_ms;
 
         let resp = c
             .subscribe_account_updates(SubscribeAccountUpdatesRequest { accounts })
@@ -130,27 +120,15 @@ impl GeyserConsumer {
         let mut stream = resp.into_inner();
 
         let mut latest_write_slot = 0;
-        let mut last_heartbeat = Instant::now();
-        let heartbeat_expiration =
-            expected_heartbeat_interval_ms * max_allowable_missed_heartbeats as u64;
-        let heartbeat_expiration = Duration::from_millis(heartbeat_expiration);
-        let mut expected_heartbeat_interval =
-            interval(Duration::from_millis(expected_heartbeat_interval_ms));
+        let mut tick = interval(Duration::from_secs(1));
 
         while !self.exit.load(Ordering::Relaxed) {
             tokio::select! {
-                now = expected_heartbeat_interval.tick() => {
-                    let heartbeat_expired = now.duration_since(last_heartbeat).gt(&heartbeat_expiration);
-                    if heartbeat_expired {
-                        return Err(MissedHeartbeat);
-                    }
-                }
                 maybe_message = stream.message() => {
                     if let Some(account_update) = Self::process_account_update(
                         maybe_message,
                         &mut account_write_sequences,
                         &highest_rooted_slot,
-                        &mut last_heartbeat,
                         oldest_write_slot,
                         max_rooted_slot_distance,
                     )? {
@@ -159,6 +137,9 @@ impl GeyserConsumer {
                             return Err(GeyserConsumerError::ConsumerChannelDisconnected);
                         }
                     }
+                }
+                _ = tick.tick() => {
+                    // helpful for checking exit faster vs. blocking on stream.message()
                 }
             }
         }
@@ -235,13 +216,18 @@ impl GeyserConsumer {
     ) -> Result<()> {
         let mut c = self.client.clone();
 
-        let resp = c.subscribe_slot_updates(EmptyRequest {}).await?;
+        let resp = c
+            .subscribe_slot_updates(SubscribeSlotUpdateRequest {})
+            .await?;
         let mut stream = resp.into_inner();
 
         while !self.exit.load(Ordering::Relaxed) {
             match stream.message().await {
                 Ok(Some(slot_update)) => {
-                    if slot_updates_tx.send(slot_update.into()).is_err() {
+                    if slot_updates_tx
+                        .send(slot_update.slot_update.unwrap().into())
+                        .is_err()
+                    {
                         return Err(GeyserConsumerError::ConsumerChannelDisconnected);
                     };
                 }
@@ -255,36 +241,28 @@ impl GeyserConsumer {
 
     #[allow(clippy::too_many_arguments)]
     fn process_account_update(
-        maybe_message: std::result::Result<Option<MaybeAccountUpdate>, Status>,
+        maybe_message: std::result::Result<Option<TimestampedAccountUpdate>, Status>,
         account_write_sequences: &mut AccountWriteSeqsCache,
         highest_rooted_slot: &Arc<AtomicU64>,
-        last_heartbeat: &mut Instant,
         oldest_write_slot: Slot,
         max_rooted_slot_distance: u64,
     ) -> Result<Option<AccountUpdate>> {
         match maybe_message {
-            Ok(Some(maybe_update)) => match maybe_update.msg {
-                Some(maybe_account_update::Msg::AccountUpdate(update)) => {
-                    let mut update: AccountUpdate = update.into();
-                    if let Err(e) = Self::process_update(
-                        &mut update,
-                        account_write_sequences,
-                        highest_rooted_slot,
-                        max_rooted_slot_distance,
-                        oldest_write_slot,
-                    ) {
-                        error!("error processing update: {:?}", e);
-                        Err(e)
-                    } else {
-                        Ok(Some(update))
-                    }
+            Ok(Some(maybe_update)) => {
+                let mut update: AccountUpdate = maybe_update.account_update.unwrap().into();
+                if let Err(e) = Self::process_update(
+                    &mut update,
+                    account_write_sequences,
+                    highest_rooted_slot,
+                    max_rooted_slot_distance,
+                    oldest_write_slot,
+                ) {
+                    error!("error processing update: {:?}", e);
+                    Err(e)
+                } else {
+                    Ok(Some(update))
                 }
-                Some(maybe_account_update::Msg::Hb(_)) => {
-                    *last_heartbeat = Instant::now();
-                    Ok(None)
-                }
-                None => unreachable!("msg must be Some"),
-            },
+            }
             Ok(None) => Err(StreamClosed),
             Err(e) => Err(e.into()),
         }
@@ -381,22 +359,19 @@ fn extract_highest_write_slot_header<T>(resp: &Response<T>) -> Result<Slot> {
     if let Some(highest_write_slot) = resp.metadata().get(HIGHEST_WRITE_SLOT_HEADER) {
         let highest_write_slot = highest_write_slot.to_str().map_err(|e| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error deserializing {} header: {}",
-                HIGHEST_WRITE_SLOT_HEADER, e
+                "error deserializing {HIGHEST_WRITE_SLOT_HEADER} header: {e}",
             ))
         })?;
         let highest_write_slot: Slot = highest_write_slot.parse().map_err(|e: ParseIntError| {
             GeyserConsumerError::MalformedResponse(format!(
-                "error parsing {} header: {}",
-                HIGHEST_WRITE_SLOT_HEADER, e
+                "error parsing {HIGHEST_WRITE_SLOT_HEADER} header: {e}",
             ))
         })?;
 
         Ok(highest_write_slot)
     } else {
         Err(GeyserConsumerError::MalformedResponse(format!(
-            "missing {} header",
-            HIGHEST_WRITE_SLOT_HEADER
+            "missing {HIGHEST_WRITE_SLOT_HEADER} header",
         )))
     }
 }

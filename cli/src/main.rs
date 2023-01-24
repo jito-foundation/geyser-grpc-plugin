@@ -5,9 +5,11 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
-use geyser_grpc_plugin_client::geyser_proto::{
-    geyser_client::GeyserClient, maybe_account_update::Msg, EmptyRequest, MaybeAccountUpdate,
-    SlotUpdateStatus, SubscribeAccountUpdatesRequest, SubscribeProgramsUpdatesRequest,
+use jito_geyser_protos::solana::geyser::{
+    geyser_client::GeyserClient, EmptyRequest, SlotUpdateStatus, SubscribeAccountUpdatesRequest,
+    SubscribeBlockUpdatesRequest, SubscribePartialAccountUpdatesRequest,
+    SubscribeProgramsUpdatesRequest, SubscribeSlotUpdateRequest,
+    SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate,
 };
 use prost_types::Timestamp;
 use solana_sdk::pubkey::Pubkey;
@@ -29,7 +31,7 @@ struct Args {
     access_token: Uuid,
 
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Debug, Subcommand)]
@@ -51,6 +53,18 @@ enum Commands {
         #[clap(required = true)]
         accounts: Vec<String>,
     },
+
+    /// Get the heartbeat interval
+    GetHeartbeatInterval,
+
+    /// Get partial account updates
+    PartialAccounts { skip_votes: bool },
+
+    /// Subscribe to transactions
+    Transactions,
+
+    /// Subscribe to blocks
+    Blocks,
 }
 
 struct GrpcInterceptor {
@@ -70,7 +84,7 @@ impl Interceptor for GrpcInterceptor {
 #[tokio::main]
 async fn main() {
     let args: Args = Args::parse();
-    println!("args: {:?}", args);
+    println!("args: {args:?}");
 
     // The geyser client must use https and ensure their OS and client is configured for TLS
     let url = format!("https://{}", args.url);
@@ -89,31 +103,31 @@ async fn main() {
     let mut client = GeyserClient::with_interceptor(channel, interceptor);
 
     match args.command {
-        None => {}
-        Some(Commands::Slots {}) => {
+        Commands::Slots => {
             let mut stream = client
-                .subscribe_slot_updates(EmptyRequest {})
+                .subscribe_slot_updates(SubscribeSlotUpdateRequest {})
                 .await
                 .expect("subscribes to slot stream")
                 .into_inner();
             while let Some(msg) = stream.next().await {
                 match msg {
                     Ok(update) => {
+                        let slot_update = update.slot_update.unwrap();
                         println!(
                             "slot: {} parent: {:?} status: {:?}",
-                            update.slot,
-                            update.parent_slot,
-                            SlotUpdateStatus::from_i32(update.status)
+                            slot_update.slot,
+                            slot_update.parent_slot,
+                            SlotUpdateStatus::from_i32(slot_update.status)
                         );
                     }
                     Err(e) => {
-                        println!("subscribe_slot_updates error: {:?}", e);
+                        println!("subscribe_slot_updates error: {e:?}");
                     }
                 }
             }
         }
-        Some(Commands::Programs { programs: accounts }) => {
-            println!("subscribing to programs: {:?}", accounts);
+        Commands::Programs { programs: accounts } => {
+            println!("subscribing to programs: {accounts:?}");
             let response = client
                 .subscribe_program_updates(SubscribeProgramsUpdatesRequest {
                     programs: accounts
@@ -126,8 +140,8 @@ async fn main() {
                 .into_inner();
             print_account_updates(response).await;
         }
-        Some(Commands::Accounts { accounts }) => {
-            println!("subscribing to accounts: {:?}", accounts);
+        Commands::Accounts { accounts } => {
+            println!("subscribing to accounts: {accounts:?}");
             let response = client
                 .subscribe_account_updates(SubscribeAccountUpdatesRequest {
                     accounts: accounts
@@ -139,6 +153,73 @@ async fn main() {
                 .expect("subscribe to geyser")
                 .into_inner();
             print_account_updates(response).await;
+        }
+        Commands::GetHeartbeatInterval => {
+            let response = client
+                .get_heartbeat_interval(EmptyRequest {})
+                .await
+                .expect("gets heartbeat interval")
+                .into_inner();
+            println!("heartbeat interval: {response:?}");
+        }
+        Commands::PartialAccounts { skip_votes } => {
+            let mut response = client
+                .subscribe_partial_account_updates(SubscribePartialAccountUpdatesRequest {
+                    skip_vote_accounts: skip_votes,
+                })
+                .await
+                .expect("subscribes to partial updates")
+                .into_inner();
+            loop {
+                let account_update = response
+                    .message()
+                    .await
+                    .expect("get partial account update");
+                match account_update {
+                    None => {
+                        println!("error receiving account update, exiting");
+                    }
+                    Some(partial_update) => {
+                        println!("partial update: {partial_update:?}");
+                    }
+                }
+            }
+        }
+        Commands::Transactions => {
+            let mut response = client
+                .subscribe_transaction_updates(SubscribeTransactionUpdatesRequest {})
+                .await
+                .expect("subscribes to transaction updates")
+                .into_inner();
+            loop {
+                let transaction_update = response.message().await.expect("get transaction update");
+                match transaction_update {
+                    None => {
+                        println!("error receiving account update, exiting");
+                    }
+                    Some(transaction_update) => {
+                        println!("transaction update: {transaction_update:?}");
+                    }
+                }
+            }
+        }
+        Commands::Blocks => {
+            let mut response = client
+                .subscribe_block_updates(SubscribeBlockUpdatesRequest {})
+                .await
+                .expect("subscribes to block updates")
+                .into_inner();
+            loop {
+                let block_update = response.message().await.expect("get block update");
+                match block_update {
+                    None => {
+                        println!("error receiving block update, exiting");
+                    }
+                    Some(block_update) => {
+                        println!("block update: {block_update:?}");
+                    }
+                }
+            }
         }
     }
 }
@@ -152,30 +233,25 @@ fn calc_skew(ts: &Timestamp) -> f64 {
         .unwrap_or_else(|| packet_ts.checked_sub(now).unwrap().as_secs_f64() * -1.0)
 }
 
-async fn print_account_updates(mut response: Streaming<MaybeAccountUpdate>) {
+async fn print_account_updates(mut response: Streaming<TimestampedAccountUpdate>) {
     loop {
-        let account_update = response
-            .message()
-            .await
-            .expect("get account update")
-            .expect("get account update");
-        match account_update.msg {
+        let account_update = response.message().await.expect("get account update");
+        match account_update {
             None => {
                 println!("error, exiting...");
                 break;
             }
-            Some(Msg::AccountUpdate(update)) => {
-                let skew = calc_skew(&update.ts.unwrap());
+            Some(update) => {
+                let ts = update.ts.unwrap();
+                let account_update = update.account_update.unwrap();
+                let skew = calc_skew(&ts);
                 println!(
                     "# {:?} slot: {:?} pubkey: {:?} clock skew: {:.3}s",
-                    update.seq,
-                    update.slot,
-                    Pubkey::new(update.pubkey.as_slice()),
+                    account_update.seq,
+                    account_update.slot,
+                    Pubkey::new(account_update.pubkey.as_slice()),
                     skew
                 );
-            }
-            Some(Msg::Hb(_)) => {
-                println!("heartbeat");
             }
         }
     }

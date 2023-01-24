@@ -2,5 +2,6 @@
 members = [
     "cli",
     "client",
-    "server",
+    "proto",
+    "server"
 ]

@@ -12,14 +12,11 @@ use std::{
     sync::{atomic::AtomicBool, Arc},
 };
 
+use jito_geyser_protos::solana::geyser::geyser_client::GeyserClient;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
-use crate::{geyser_consumer::GeyserConsumer, geyser_proto::geyser_client::GeyserClient};
-
-pub mod geyser_proto {
-    tonic::include_proto!("geyser");
-}
+use crate::geyser_consumer::GeyserConsumer;
 
 pub async fn connect(
     geyser_addr: String,
