@@ -16,12 +16,14 @@ use std::{
     time::Duration,
 };
 
-use crossbeam::channel::{Sender, TrySendError};
 use geyser_proto::geyser_client::GeyserClient;
 use log::*;
 use lru::LruCache;
 use thiserror::Error;
-use tokio::time::{interval, Instant};
+use tokio::{
+    sync::mpsc::UnboundedSender,
+    time::{interval, Instant},
+};
 use tonic::{transport::Channel, Response, Status};
 
 use crate::{
@@ -99,7 +101,7 @@ impl GeyserConsumer {
 
     pub async fn consume_account_updates(
         &self,
-        account_updates_tx: Sender<AccountUpdate>,
+        account_updates_tx: UnboundedSender<AccountUpdate>,
         highest_rooted_slot: Arc<AtomicU64>,
         // Oldest slot from root consumer willing to tolerate.
         // e.g.
@@ -153,8 +155,8 @@ impl GeyserConsumer {
                         max_rooted_slot_distance,
                     )? {
                         latest_write_slot = latest_write_slot.max(account_update.slot);
-                        if let Err(e) = account_updates_tx.try_send(account_update) {
-                            check_try_send_err(e)?;
+                        if account_updates_tx.send(account_update).is_err() {
+                            return Err(GeyserConsumerError::ConsumerChannelDisconnected);
                         }
                     }
                 }
@@ -166,7 +168,7 @@ impl GeyserConsumer {
 
     pub async fn consume_partial_account_updates(
         &self,
-        partial_account_updates_tx: Sender<PartialAccountUpdate>,
+        partial_account_updates_tx: UnboundedSender<PartialAccountUpdate>,
         highest_rooted_slot: Arc<AtomicU64>,
         max_rooted_slot_distance: u64,
         max_allowable_missed_heartbeats: usize,
@@ -216,8 +218,8 @@ impl GeyserConsumer {
                         max_rooted_slot_distance,
                     ).await? {
                         latest_write_slot = latest_write_slot.max(account_update.slot);
-                        if let Err(e) = partial_account_updates_tx.try_send(account_update) {
-                            check_try_send_err(e)?;
+                        if partial_account_updates_tx.send(account_update).is_err() {
+                            return Err(GeyserConsumerError::ConsumerChannelDisconnected);
                         }
                     }
                 }
@@ -227,7 +229,10 @@ impl GeyserConsumer {
         Ok(())
     }
 
-    pub async fn consume_slot_updates(&self, slot_updates_tx: Sender<SlotUpdate>) -> Result<()> {
+    pub async fn consume_slot_updates(
+        &self,
+        slot_updates_tx: UnboundedSender<SlotUpdate>,
+    ) -> Result<()> {
         let mut c = self.client.clone();
 
         let resp = c.subscribe_slot_updates(EmptyRequest {}).await?;
@@ -236,8 +241,8 @@ impl GeyserConsumer {
         while !self.exit.load(Ordering::Relaxed) {
             match stream.message().await {
                 Ok(Some(slot_update)) => {
-                    if let Err(e) = slot_updates_tx.try_send(slot_update.into()) {
-                        check_try_send_err(e)?;
+                    if slot_updates_tx.send(slot_update.into()).is_err() {
+                        return Err(GeyserConsumerError::ConsumerChannelDisconnected);
                     };
                 }
                 Ok(None) => return Err(StreamClosed),
@@ -393,14 +398,5 @@ fn extract_highest_write_slot_header<T>(resp: &Response<T>) -> Result<Slot> {
             "missing {} header",
             HIGHEST_WRITE_SLOT_HEADER
         )))
-    }
-}
-
-fn check_try_send_err<T>(e: TrySendError<T>) -> Result<()> {
-    if let TrySendError::Full(_) = e {
-        warn!("slow consumer");
-        Ok(())
-    } else {
-        Err(GeyserConsumerError::ConsumerChannelDisconnected)
     }
 }
