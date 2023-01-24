@@ -1,11 +1,7 @@
 //! Contains application specific representations of proto definitions.
 
+use jito_geyser_protos::solana::geyser;
 use solana_sdk::{pubkey::Pubkey, slot_hashes::Slot};
-
-use crate::geyser_proto::{
-    AccountUpdate as PbAccountUpdate, PartialAccountUpdate as PbPartialAccountUpdate,
-    SlotUpdate as PbSlotUpdate, SlotUpdateStatus as PbSlotUpdateStatus,
-};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SlotStatus {
@@ -50,8 +46,8 @@ impl AccountUpdateNotification for AccountUpdate {
     }
 }
 
-impl From<PbAccountUpdate> for AccountUpdate {
-    fn from(proto: PbAccountUpdate) -> Self {
+impl From<geyser::AccountUpdate> for AccountUpdate {
+    fn from(proto: geyser::AccountUpdate) -> Self {
         let pubkey = Pubkey::new(&proto.pubkey[..]);
         let owner = Pubkey::new(&proto.owner[..]);
 
@@ -94,8 +90,8 @@ impl AccountUpdateNotification for PartialAccountUpdate {
     }
 }
 
-impl From<PbPartialAccountUpdate> for PartialAccountUpdate {
-    fn from(proto: PbPartialAccountUpdate) -> Self {
+impl From<geyser::PartialAccountUpdate> for PartialAccountUpdate {
+    fn from(proto: geyser::PartialAccountUpdate) -> Self {
         let pubkey = Pubkey::new(&proto.pubkey[..]);
 
         Self {
@@ -114,12 +110,12 @@ pub enum SlotUpdateStatus {
     Rooted,
 }
 
-impl From<PbSlotUpdateStatus> for SlotUpdateStatus {
-    fn from(proto: PbSlotUpdateStatus) -> Self {
+impl From<geyser::SlotUpdateStatus> for SlotUpdateStatus {
+    fn from(proto: geyser::SlotUpdateStatus) -> Self {
         match proto {
-            PbSlotUpdateStatus::Confirmed => Self::Confirmed,
-            PbSlotUpdateStatus::Processed => Self::Processed,
-            PbSlotUpdateStatus::Rooted => Self::Rooted,
+            geyser::SlotUpdateStatus::Confirmed => Self::Confirmed,
+            geyser::SlotUpdateStatus::Processed => Self::Processed,
+            geyser::SlotUpdateStatus::Rooted => Self::Rooted,
         }
     }
 }
@@ -130,13 +126,13 @@ pub struct SlotUpdate {
     pub status: SlotUpdateStatus,
 }
 
-impl From<PbSlotUpdate> for SlotUpdate {
-    fn from(proto: PbSlotUpdate) -> Self {
-        let pb_status = PbSlotUpdateStatus::from_i32(proto.status).unwrap();
+impl From<geyser::SlotUpdate> for SlotUpdate {
+    fn from(proto: geyser::SlotUpdate) -> Self {
+        let status = geyser::SlotUpdateStatus::from_i32(proto.status).unwrap();
         Self {
             parent_slot: proto.parent_slot,
             slot: proto.slot,
-            status: SlotUpdateStatus::from(pb_status),
+            status: SlotUpdateStatus::from(status),
         }
     }
 }
