@@ -142,6 +142,15 @@ message SubscribeAccountUpdatesRequest {
   repeated bytes accounts = 1;
 }
 
+message Filter {
+    uint64 offset = 1;
+    uint64 length = 2;
+  }
+message SubscribeFilteredAccountUpdatesRequest{
+    repeated bytes accounts = 1;
+    Filter filter = 2;
+  }
+
 message SubscribeProgramsUpdatesRequest {
   repeated bytes programs = 1;
 }
@@ -170,6 +179,11 @@ service Geyser {
   // Subscribes to updates given a list of program IDs. When an account update comes in that's owned by a provided
   // program id, one will receive an update
   rpc SubscribeProgramUpdates(SubscribeProgramsUpdatesRequest) returns (stream TimestampedAccountUpdate) {}
+
+  // Subscribes to account updates in the accounts database; additionally pings clients with empty heartbeats.
+  // Upon initially connecting the client can expect a `highest_write_slot` set in the http headers.
+  // Subscribe to account updates with filter
+  rpc SubscribeFilteredAccountUpdates(SubscribeFilteredAccountUpdatesRequest) returns (stream TimestampedAccountUpdate) {}
 
   // Functions similarly to `SubscribeAccountUpdates`, but consumes less bandwidth.
   // Returns the highest slot seen thus far in the http headers named `highest-write-slot`.

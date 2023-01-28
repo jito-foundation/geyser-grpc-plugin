@@ -1239,6 +1239,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
+ "solana-account-decoder 1.14.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-geyser-plugin-interface 1.14.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-geyser-plugin-interface 1.14.13 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.14.13-jito)",
  "solana-logger 1.14.13 (registry+https://github.com/rust-lang/crates.io-index)",

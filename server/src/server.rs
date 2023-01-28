@@ -15,20 +15,21 @@ use jito_geyser_protos::solana::geyser::{
     geyser_server::Geyser, maybe_partial_account_update, EmptyRequest,
     GetHeartbeatIntervalResponse, Heartbeat, MaybePartialAccountUpdate, PartialAccountUpdate,
     SubscribeAccountUpdatesRequest, SubscribeBlockUpdatesRequest,
-    SubscribePartialAccountUpdatesRequest, SubscribeProgramsUpdatesRequest,
-    SubscribeSlotUpdateRequest, SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate,
-    TimestampedBlockUpdate, TimestampedSlotUpdate, TimestampedTransactionUpdate,
+    SubscribeFilteredAccountUpdatesRequest, SubscribePartialAccountUpdatesRequest,
+    SubscribeProgramsUpdatesRequest, SubscribeSlotUpdateRequest,
+    SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate, TimestampedBlockUpdate,
+    TimestampedSlotUpdate, TimestampedTransactionUpdate,
 };
 use log::*;
 use once_cell::sync::OnceCell;
 use serde_derive::Deserialize;
+use solana_account_decoder::UiDataSliceConfig;
 use thiserror::Error;
 use tokio::sync::mpsc::{channel, error::TrySendError as TokioTrySendError, Sender as TokioSender};
 use tonic::{metadata::MetadataValue, Request, Response, Status};
 use uuid::Uuid;
 
 use crate::subscription_stream::{StreamClosedSender, SubscriptionStream};
-
 static VOTE_PROGRAM_ID: OnceCell<Vec<u8>> = OnceCell::new();
 
 pub const HIGHEST_WRITE_SLOT_HEADER: &str = "highest-write-slot";
@@ -808,6 +809,67 @@ impl Geyser for GeyserService {
         Ok(resp)
     }
 
+    type SubscribeFilteredAccountUpdatesStream = SubscriptionStream<Uuid, TimestampedAccountUpdate>;
+    async fn subscribe_filtered_account_updates(
+        &self,
+        request: Request<SubscribeFilteredAccountUpdatesRequest>,
+    ) -> Result<Response<Self::SubscribeAccountUpdatesStream>, Status> {
+        let (notification_sender, notification_receiver) =
+            channel(self.service_config.subscriber_buffer_size);
+        let request = request.into_inner();
+        let accounts: HashSet<Vec<u8>> = request.accounts.into_iter().collect();
+        let all_valid_pubkeys = accounts.iter().all(|a| a.len() == 32);
+        if !all_valid_pubkeys {
+            return Err(Status::invalid_argument(
+                "a pubkey with length != 32 was provided",
+            ));
+        }
+        let data_slice_config: Option<UiDataSliceConfig>;
+        if let Some(filter) = request.filter {
+            data_slice_config = Some(UiDataSliceConfig {
+                offset: filter.offset as usize,
+                length: filter.length as usize,
+            });
+        } else {
+            data_slice_config = None;
+        }
+        let mut keyed_accounts: HashSet<Vec<u8>> = HashSet::default();
+        accounts.iter().for_each(move |a| {
+            keyed_accounts.insert(slice_data(a.as_ref(), data_slice_config).to_vec());
+        });
+
+        let uuid = Uuid::new_v4();
+        self.subscription_added_tx
+            .try_send(SubscriptionAddedEvent::AccountUpdateSubscription {
+                uuid,
+                notification_sender,
+                accounts,
+            })
+            .map_err(|e| {
+                error!(
+                    "failed to add subscribe_account_updates subscription: {}",
+                    e
+                );
+                Status::internal("error adding subscription")
+            })?;
+
+        let stream = SubscriptionStream::new(
+            notification_receiver,
+            uuid,
+            (
+                self.subscription_closed_sender.clone(),
+                SubscriptionClosedEvent::AccountUpdateSubscription(uuid),
+            ),
+            "subscribe_account_updates",
+        );
+        let mut resp = Response::new(stream);
+        resp.metadata_mut().insert(
+            HIGHEST_WRITE_SLOT_HEADER,
+            MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
+        );
+
+        Ok(resp)
+    }
     type SubscribeProgramUpdatesStream = SubscriptionStream<Uuid, TimestampedAccountUpdate>;
 
     async fn subscribe_program_updates(
@@ -1012,5 +1074,19 @@ impl Geyser for GeyserService {
             MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
         );
         Ok(resp)
+    }
+}
+
+fn slice_data(data: &[u8], data_slice_config: Option<UiDataSliceConfig>) -> &[u8] {
+    if let Some(UiDataSliceConfig { offset, length }) = data_slice_config {
+        if offset >= data.len() {
+            &[]
+        } else if length > data.len() - offset {
+            &data[offset..]
+        } else {
+            &data[offset..offset + length]
+        }
+    } else {
+        data
     }
 }
