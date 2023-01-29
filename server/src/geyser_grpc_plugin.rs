@@ -38,6 +38,7 @@ pub struct PluginData {
 
     /// Where updates are piped thru to the grpc service.
     account_update_sender: Sender<TimestampedAccountUpdate>,
+    filtered_account_update_sender: Sender<TimestampedAccountUpdate>,
     slot_update_sender: Sender<TimestampedSlotUpdate>,
     block_update_sender: Sender<TimestampedBlockUpdate>,
     transaction_update_sender: Sender<TimestampedTransactionUpdate>,
@@ -100,6 +101,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         let highest_write_slot = Arc::new(AtomicU64::new(0));
         let (account_update_sender, account_update_rx) = bounded(config.account_update_buffer_size);
+        let (filtered_account_update_sender, filtered_account_update_rx) =
+            bounded(config.account_update_buffer_size);
         let (slot_update_sender, slot_update_rx) = bounded(config.slot_update_buffer_size);
 
         let (block_update_sender, block_update_receiver) = bounded(config.block_update_buffer_size);
@@ -109,6 +112,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         let svc = GeyserService::new(
             config.geyser_service_config,
             account_update_rx,
+            filtered_account_update_rx,
             slot_update_rx,
             block_update_receiver,
             transaction_update_receiver,
@@ -130,6 +134,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             runtime,
             server_exit_sender: server_exit_tx,
             account_update_sender,
+            filtered_account_update_sender,
             slot_update_sender,
             block_update_sender,
             transaction_update_sender,

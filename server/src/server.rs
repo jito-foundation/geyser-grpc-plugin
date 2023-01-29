@@ -263,6 +263,7 @@ impl Display for SubscriptionAddedEvent {
 #[derive(Debug)]
 enum SubscriptionClosedEvent {
     AccountUpdateSubscription(Uuid),
+    FilteredAccountUpdateSubscription(Uuid),
     ProgramUpdateSubscription(Uuid),
     PartialAccountUpdateSubscription(Uuid),
     SlotUpdateSubscription(Uuid),
@@ -316,6 +317,7 @@ impl GeyserService {
         service_config: GeyserServiceConfig,
         // Account updates streamed from the validator.
         account_update_rx: Receiver<TimestampedAccountUpdate>,
+        filtered_account_update_rx: Receiver<TimestampedAccountUpdate>,
         // Slot updates streamed from the validator.
         slot_update_rx: Receiver<TimestampedSlotUpdate>,
         // Block metadata receiver
@@ -331,6 +333,7 @@ impl GeyserService {
 
         let t_hdl = Self::event_loop(
             account_update_rx,
+            filtered_account_update_rx,
             slot_update_rx,
             block_update_receiver,
             transaction_update_receiver,
@@ -360,6 +363,7 @@ impl GeyserService {
     ///     3. Receive geyser events and stream them to subscribers.
     fn event_loop(
         account_update_rx: Receiver<TimestampedAccountUpdate>,
+        filtered_account_update_rx: Receiver<TimestampedAccountUpdate>,
         slot_update_rx: Receiver<TimestampedSlotUpdate>,
         block_update_receiver: Receiver<TimestampedBlockUpdate>,
         transaction_update_receiver: Receiver<TimestampedTransactionUpdate>,
@@ -372,6 +376,8 @@ impl GeyserService {
             .spawn(move || {
                 info!("Starting event loop");
                 let mut account_update_subscriptions: HashMap<Uuid, AccountUpdateSubscription> =
+                    HashMap::new();
+                let mut filtered_account_update_subscriptions: HashMap<Uuid, AccountUpdateSubscription> =
                     HashMap::new();
                 let mut program_update_subscriptions: HashMap<Uuid, AccountUpdateSubscription> =
                     HashMap::new();
@@ -400,7 +406,7 @@ impl GeyserService {
                         },
                         recv(subscription_closed_rx) -> maybe_subscription_closed => {
                             info!("closing subscription");
-                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions,&mut filtered_account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
                                 error!("error closing existing subscription: {}", e);
                                 return;
                             }
@@ -592,6 +598,7 @@ impl GeyserService {
     fn handle_subscription_closed(
         maybe_subscription_closed: Result<SubscriptionClosedEvent, RecvError>,
         account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
+        filtered_account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
         program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
@@ -604,6 +611,9 @@ impl GeyserService {
         match subscription_closed {
             SubscriptionClosedEvent::AccountUpdateSubscription(subscription_id) => {
                 let _ = account_update_subscriptions.remove(&subscription_id);
+            }
+            SubscriptionClosedEvent::FilteredAccountUpdateSubscription(subscription_id) => {
+                let _ = filtered_account_update_subscriptions.remove(&subscription_id);
             }
             SubscriptionClosedEvent::PartialAccountUpdateSubscription(subscription_id) => {
                 let _ = partial_account_update_subscriptions.remove(&subscription_id);
@@ -847,7 +857,7 @@ impl Geyser for GeyserService {
             })
             .map_err(|e| {
                 error!(
-                    "failed to add subscribe_account_updates subscription: {}",
+                    "failed to add subscribe_filtered_account_updates subscription: {}",
                     e
                 );
                 Status::internal("error adding subscription")
@@ -860,7 +870,7 @@ impl Geyser for GeyserService {
                 self.subscription_closed_sender.clone(),
                 SubscriptionClosedEvent::AccountUpdateSubscription(uuid),
             ),
-            "subscribe_account_updates",
+            "subscribe_filtered_account_updates",
         );
         let mut resp = Response::new(stream);
         resp.metadata_mut().insert(
