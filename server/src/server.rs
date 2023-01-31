@@ -425,6 +425,20 @@ impl GeyserService {
                                 },
                             }
                         },
+                        recv(filtered_account_update_rx) -> maybe_filtered_account_update => {
+                            debug!("received account update");
+                            match Self::handle_filtered_account_update_event(maybe_filtered_account_update, &filtered_account_update_subscriptions, &partial_account_update_subscriptions, &program_update_subscriptions) {
+                                Err(e) => {
+                                    error!("error handling an account update event: {}", e);
+                                    return;
+                                },
+                                Ok(failed_subscription_ids) => {
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut account_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut program_update_subscriptions);
+                                },
+                            }
+                        },
                         recv(slot_update_rx) -> maybe_slot_update => {
                             debug!("received slot update");
                             match Self::handle_slot_update_event(maybe_slot_update, &slot_update_subscriptions) {
@@ -646,6 +660,78 @@ impl GeyserService {
         let update = account_update.account_update.as_ref().unwrap();
 
         let failed_account_update_sends: Vec<Uuid> = account_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if sub.accounts.contains(update.pubkey.as_slice())
+                    && matches!(
+                        sub.notification_sender.try_send(Ok(account_update.clone())),
+                        Err(TokioTrySendError::Closed(_))
+                    )
+                {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let failed_program_update_sends: Vec<Uuid> = program_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if sub.accounts.contains(update.owner.as_slice())
+                    && matches!(
+                        sub.notification_sender.try_send(Ok(account_update.clone())),
+                        Err(TokioTrySendError::Closed(_))
+                    )
+                {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let update = account_update.account_update.unwrap();
+        let partial_account_update = PartialAccountUpdate {
+            slot: update.slot,
+            pubkey: update.pubkey,
+            owner: update.owner,
+            is_startup: update.is_startup,
+            seq: update.seq,
+            tx_signature: update.tx_signature,
+            replica_version: update.replica_version,
+        };
+
+        let failed_partial_account_update_sends: Vec<Uuid> = partial_account_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.stream_update(&partial_account_update),
+                    Err(GeyserServiceError::NotificationReceiverDisconnected)
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(failed_account_update_sends
+            .into_iter()
+            .chain(failed_partial_account_update_sends.into_iter())
+            .chain(failed_program_update_sends.into_iter())
+            .collect())
+    }
+    fn handle_filtered_account_update_event(
+        maybe_filtered_account_update: Result<TimestampedAccountUpdate, RecvError>,
+        filtered_account_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
+        partial_account_update_subscriptions: &HashMap<Uuid, PartialAccountUpdateSubscription>,
+        program_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
+    ) -> GeyserServiceResult<Vec<Uuid>> {
+        let account_update = maybe_filtered_account_update?;
+        let update = account_update.account_update.as_ref().unwrap();
+
+        let failed_account_update_sends: Vec<Uuid> = filtered_account_update_subscriptions
             .iter()
             .filter_map(|(uuid, sub)| {
                 if sub.accounts.contains(update.pubkey.as_slice())
