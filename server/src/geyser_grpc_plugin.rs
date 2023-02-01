@@ -18,7 +18,7 @@ use jito_geyser_protos::solana::{
         TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotUpdate,
         TimestampedTransactionUpdate, TransactionUpdate,
     },
-    storage::{confirmed_block, confirmed_block::ConfirmedTransaction},
+    storage::confirmed_block::ConfirmedTransaction,
 };
 use log::*;
 use serde_derive::Deserialize;
@@ -174,25 +174,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     replica_version: 1,
                 }),
             },
-            // ReplicaAccountInfoVersions::V0_0_2(account) => {
-            //     let tx_signature = account.txn_signature.map(|sig| sig.to_string());
-            //     TimestampedAccountUpdate {
-            //         ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-            //         account_update: Some(AccountUpdate {
-            //             slot,
-            //             pubkey: account.pubkey.to_vec(),
-            //             lamports: account.lamports,
-            //             owner: account.owner.to_vec(),
-            //             is_executable: account.executable,
-            //             rent_epoch: account.rent_epoch,
-            //             data: account.data.to_vec(),
-            //             seq: account.write_version,
-            //             is_startup,
-            //             tx_signature,
-            //             replica_version: 2,
-            //         }),
-            //     }
-            // }
         };
 
         let pubkey = &account_update.account_update.as_ref().unwrap().pubkey;
@@ -294,28 +275,11 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     is_vote: tx.is_vote,
                     tx_idx: u64::MAX,
                     tx: Some(ConfirmedTransaction {
-                        transaction: Some(confirmed_block::Transaction::from(
-                            tx.transaction.to_versioned_transaction(),
-                        )),
-                        meta: Some(confirmed_block::TransactionStatusMeta::from(
-                            tx.transaction_status_meta.clone(),
-                        )),
+                        transaction: Some(tx.transaction.to_versioned_transaction().into()),
+                        meta: Some(tx.transaction_status_meta.clone().into()),
                     }),
                 }),
             },
-            // ReplicaTransactionInfoVersions::V0_0_2(tx) => TimestampedTransactionUpdate {
-            //     ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-            //     transaction: Some(TransactionUpdate {
-            //         slot,
-            //         signature: tx.signature.to_string(),
-            //         is_vote: tx.is_vote,
-            //         tx_idx: tx.index as u64,
-            //         tx: Some(ConfirmedTransaction {
-            //             transaction: Some(tx.transaction.to_versioned_transaction().into()),
-            //             meta: Some(tx.transaction_status_meta.clone().into()),
-            //         }),
-            //     }),
-            // },
         };
 
         match data.transaction_update_sender.try_send(transaction_update) {
