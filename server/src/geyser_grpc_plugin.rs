@@ -12,27 +12,35 @@ use std::{
 
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
+use jito_geyser_protos::solana::{
+    geyser::{
+        geyser_server::GeyserServer, AccountUpdate, BlockUpdate, SlotUpdate, SlotUpdateStatus,
+        TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotUpdate,
+        TimestampedTransactionUpdate, TransactionUpdate,
+    },
+    storage::confirmed_block::ConfirmedTransaction,
+};
 use log::*;
 use serde_derive::Deserialize;
 use serde_json;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
-    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, Result as PluginResult, SlotStatus,
+    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
+    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::transport::Server;
 
-use crate::{
-    geyser_proto::{geyser_server::GeyserServer, AccountUpdate, SlotUpdate, SlotUpdateStatus},
-    server::{GeyserService, GeyserServiceConfig},
-};
+use crate::server::{GeyserService, GeyserServiceConfig};
 
 pub struct PluginData {
     runtime: Runtime,
-    server_exit_tx: oneshot::Sender<()>,
+    server_exit_sender: oneshot::Sender<()>,
 
     /// Where updates are piped thru to the grpc service.
-    account_update_tx: Sender<AccountUpdate>,
-    slot_update_tx: Sender<SlotUpdate>,
+    account_update_sender: Sender<TimestampedAccountUpdate>,
+    slot_update_sender: Sender<TimestampedSlotUpdate>,
+    block_update_sender: Sender<TimestampedBlockUpdate>,
+    transaction_update_sender: Sender<TimestampedTransactionUpdate>,
 
     /// Highest slot that an account write has been processed for thus far.
     highest_write_slot: Arc<AtomicU64>,
@@ -56,6 +64,8 @@ pub struct PluginConfig {
     pub bind_address: String,
     pub account_update_buffer_size: usize,
     pub slot_update_buffer_size: usize,
+    pub block_update_buffer_size: usize,
+    pub transaction_update_buffer_size: usize,
 }
 
 impl GeyserPlugin for GeyserGrpcPlugin {
@@ -89,12 +99,19 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 })?;
 
         let highest_write_slot = Arc::new(AtomicU64::new(0));
-        let (account_update_tx, account_update_rx) = bounded(config.account_update_buffer_size);
-        let (slot_update_tx, slot_update_rx) = bounded(config.slot_update_buffer_size);
+        let (account_update_sender, account_update_rx) = bounded(config.account_update_buffer_size);
+        let (slot_update_sender, slot_update_rx) = bounded(config.slot_update_buffer_size);
+
+        let (block_update_sender, block_update_receiver) = bounded(config.block_update_buffer_size);
+        let (transaction_update_sender, transaction_update_receiver) =
+            bounded(config.transaction_update_buffer_size);
+
         let svc = GeyserService::new(
             config.geyser_service_config,
             account_update_rx,
             slot_update_rx,
+            block_update_receiver,
+            transaction_update_receiver,
             highest_write_slot.clone(),
         );
         let svc = GeyserServer::new(svc);
@@ -111,9 +128,11 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         self.data = Some(PluginData {
             runtime,
-            server_exit_tx,
-            account_update_tx,
-            slot_update_tx,
+            server_exit_sender: server_exit_tx,
+            account_update_sender,
+            slot_update_sender,
+            block_update_sender,
+            transaction_update_sender,
             highest_write_slot,
         });
         info!("plugin data initialized");
@@ -125,7 +144,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         info!("Unloading plugin: {:?}", self.name());
 
         let data = self.data.take().expect("plugin not initialized");
-        data.server_exit_tx
+        data.server_exit_sender
             .send(())
             .expect("sending grpc server termination should succeed");
         data.runtime.shutdown_background();
@@ -139,33 +158,39 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
         let account_update = match account {
-            ReplicaAccountInfoVersions::V0_0_1(account) => AccountUpdate {
-                slot,
-                pubkey: account.pubkey.to_vec(),
-                lamports: account.lamports,
-                owner: account.owner.to_vec(),
-                is_executable: account.executable,
-                rent_epoch: account.rent_epoch,
-                data: account.data.to_vec(),
-                seq: account.write_version,
-                is_startup,
-                tx_signature: None,
-                replica_version: 1,
+            ReplicaAccountInfoVersions::V0_0_1(account) => TimestampedAccountUpdate {
                 ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                account_update: Some(AccountUpdate {
+                    slot,
+                    pubkey: account.pubkey.to_vec(),
+                    lamports: account.lamports,
+                    owner: account.owner.to_vec(),
+                    is_executable: account.executable,
+                    rent_epoch: account.rent_epoch,
+                    data: account.data.to_vec(),
+                    seq: account.write_version,
+                    is_startup,
+                    tx_signature: None,
+                    replica_version: 1,
+                }),
             },
         };
 
-        if account_update.pubkey.len() != 32 {
+        let pubkey = &account_update.account_update.as_ref().unwrap().pubkey;
+        let owner = &account_update.account_update.as_ref().unwrap().owner;
+
+        if pubkey.len() != 32 {
             error!(
                 "bad account pubkey length: {}",
-                bs58::encode(account_update.pubkey).into_string()
+                bs58::encode(pubkey).into_string()
             );
             return Ok(());
         }
-        if account_update.owner.len() != 32 {
+
+        if owner.len() != 32 {
             error!(
                 "bad account owner pubkey length: {}",
-                bs58::encode(account_update.owner).into_string()
+                bs58::encode(owner).into_string()
             );
             return Ok(());
         }
@@ -174,12 +199,12 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         debug!(
             "Streaming AccountUpdate {:?} with owner {:?} at slot {:?}",
-            bs58::encode(&account_update.pubkey[..]).into_string(),
-            bs58::encode(&account_update.owner[..]).into_string(),
+            bs58::encode(&pubkey[..]).into_string(),
+            bs58::encode(&owner[..]).into_string(),
             slot,
         );
 
-        match data.account_update_tx.try_send(account_update) {
+        match data.account_update_sender.try_send(account_update) {
             Ok(_) => Ok(()),
             Err(TrySendError::Full(_)) => {
                 warn!("account_update channel full, skipping");
@@ -213,11 +238,13 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             SlotStatus::Rooted => SlotUpdateStatus::Rooted,
         };
 
-        match data.slot_update_tx.try_send(SlotUpdate {
-            slot,
-            parent_slot,
-            status: status as i32,
+        match data.slot_update_sender.try_send(TimestampedSlotUpdate {
             ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+            slot_update: Some(SlotUpdate {
+                slot,
+                parent_slot,
+                status: status as i32,
+            }),
         }) {
             Ok(_) => Ok(()),
             Err(TrySendError::Full(_)) => {
@@ -231,6 +258,85 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 })
             }
         }
+    }
+
+    fn notify_transaction(
+        &mut self,
+        transaction: ReplicaTransactionInfoVersions,
+        slot: u64,
+    ) -> PluginResult<()> {
+        let data = self.data.as_ref().expect("plugin must be initialized");
+        let transaction_update = match transaction {
+            ReplicaTransactionInfoVersions::V0_0_1(tx) => TimestampedTransactionUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                transaction: Some(TransactionUpdate {
+                    slot,
+                    signature: tx.signature.to_string(),
+                    is_vote: tx.is_vote,
+                    tx_idx: u64::MAX,
+                    tx: Some(ConfirmedTransaction {
+                        transaction: Some(tx.transaction.to_versioned_transaction().into()),
+                        meta: Some(tx.transaction_status_meta.clone().into()),
+                    }),
+                }),
+            },
+        };
+
+        match data.transaction_update_sender.try_send(transaction_update) {
+            Ok(_) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                warn!("transaction_update_sender full");
+                Ok(())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                error!("transaction_update_sender disconnected");
+                Err(GeyserPluginError::TransactionUpdateError {
+                    msg: "transaction_update_sender channel disconnected, exiting".to_string(),
+                })
+            }
+        }
+    }
+
+    fn notify_block_metadata(&mut self, block_info: ReplicaBlockInfoVersions) -> PluginResult<()> {
+        let data = self.data.as_ref().expect("plugin must be initialized");
+
+        let block = match block_info {
+            ReplicaBlockInfoVersions::V0_0_1(block) => TimestampedBlockUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                block_update: Some(BlockUpdate {
+                    slot: block.slot,
+                    blockhash: block.blockhash.to_string(),
+                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
+                    block_time: block.block_time.map(|t| prost_types::Timestamp {
+                        seconds: t,
+                        nanos: 0,
+                    }),
+                    block_height: block.block_height,
+                }),
+            },
+        };
+        match data.block_update_sender.try_send(block) {
+            Ok(_) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                warn!("block update sender full");
+                Ok(())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                error!("block update send disconnected");
+                Err(GeyserPluginError::Custom(
+                    Box::try_from("block_update_sender channel disconnected, exiting".to_string())
+                        .unwrap(),
+                ))
+            }
+        }
+    }
+
+    fn account_data_notifications_enabled(&self) -> bool {
+        true
+    }
+
+    fn transaction_notifications_enabled(&self) -> bool {
+        true
     }
 }
 
