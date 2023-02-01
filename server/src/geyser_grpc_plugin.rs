@@ -18,7 +18,7 @@ use jito_geyser_protos::solana::{
         TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotUpdate,
         TimestampedTransactionUpdate, TransactionUpdate,
     },
-    storage::confirmed_block::ConfirmedTransaction,
+    storage::{confirmed_block, confirmed_block::ConfirmedTransaction},
 };
 use log::*;
 use serde_derive::Deserialize;
@@ -294,8 +294,12 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     is_vote: tx.is_vote,
                     tx_idx: u64::MAX,
                     tx: Some(ConfirmedTransaction {
-                        transaction: Some(tx.transaction.to_versioned_transaction().into()),
-                        meta: Some(tx.transaction_status_meta.clone().into()),
+                        transaction: Some(confirmed_block::Transaction::from(
+                            tx.transaction.to_versioned_transaction(),
+                        )),
+                        meta: Some(confirmed_block::TransactionStatusMeta::from(
+                            tx.transaction_status_meta.clone(),
+                        )),
                     }),
                 }),
             },
