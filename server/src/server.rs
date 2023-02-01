@@ -6,11 +6,19 @@ use std::{
         Arc,
     },
     thread::{Builder, JoinHandle},
-    time::{Duration, Instant, SystemTime},
+    time::{Duration, Instant},
 };
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use crossbeam_channel::{tick, RecvError};
+use jito_geyser_protos::solana::geyser::{
+    geyser_server::Geyser, maybe_partial_account_update, EmptyRequest,
+    GetHeartbeatIntervalResponse, Heartbeat, MaybePartialAccountUpdate, PartialAccountUpdate,
+    SubscribeAccountUpdatesRequest, SubscribeBlockUpdatesRequest,
+    SubscribePartialAccountUpdatesRequest, SubscribeProgramsUpdatesRequest,
+    SubscribeSlotUpdateRequest, SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate,
+    TimestampedBlockUpdate, TimestampedSlotUpdate, TimestampedTransactionUpdate,
+};
 use log::*;
 use once_cell::sync::OnceCell;
 use serde_derive::Deserialize;
@@ -19,16 +27,7 @@ use tokio::sync::mpsc::{channel, error::TrySendError as TokioTrySendError, Sende
 use tonic::{metadata::MetadataValue, Request, Response, Status};
 use uuid::Uuid;
 
-use crate::{
-    geyser_proto::{
-        geyser_server::Geyser, maybe_account_update::Msg, maybe_partial_account_update,
-        AccountUpdate, EmptyRequest, GetHeartbeatIntervalResponse, Heartbeat, MaybeAccountUpdate,
-        MaybePartialAccountUpdate, PartialAccountUpdate, SlotUpdate,
-        SubscribeAccountUpdatesRequest, SubscribePartialAccountUpdatesRequest,
-        SubscribeProgramsUpdatesRequest,
-    },
-    subscription_stream::{StreamClosedSender, SubscriptionStream},
-};
+use crate::subscription_stream::{StreamClosedSender, SubscriptionStream};
 
 static VOTE_PROGRAM_ID: OnceCell<Vec<u8>> = OnceCell::new();
 
@@ -47,9 +46,11 @@ impl StreamClosedSender<SubscriptionClosedEvent> for SubscriptionClosedSender {
     }
 }
 
-type AccountUpdateSender = TokioSender<Result<MaybeAccountUpdate, Status>>;
+type AccountUpdateSender = TokioSender<Result<TimestampedAccountUpdate, Status>>;
 type PartialAccountUpdateSender = TokioSender<Result<MaybePartialAccountUpdate, Status>>;
-type SlotUpdateSender = TokioSender<Result<SlotUpdate, Status>>;
+type SlotUpdateSender = TokioSender<Result<TimestampedSlotUpdate, Status>>;
+type TransactionUpdateSender = TokioSender<Result<TimestampedTransactionUpdate, Status>>;
+type BlockUpdateSender = TokioSender<Result<TimestampedBlockUpdate, Status>>;
 
 trait AccountUpdateStreamer<T> {
     fn stream_update(&self, update: &T) -> GeyserServiceResult<()>;
@@ -66,21 +67,6 @@ trait ErrorStatusStreamer {
 struct AccountUpdateSubscription {
     notification_sender: AccountUpdateSender,
     accounts: HashSet<Vec<u8>>,
-}
-
-impl HeartbeatStreamer for AccountUpdateSubscription {
-    fn send_heartbeat(&self) -> GeyserServiceResult<()> {
-        self.notification_sender
-            .try_send(Ok(MaybeAccountUpdate {
-                msg: Some(Msg::Hb(Heartbeat {})),
-            }))
-            .map_err(|e| match e {
-                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
-                TokioTrySendError::Closed(_) => {
-                    GeyserServiceError::NotificationReceiverDisconnected
-                }
-            })
-    }
 }
 
 impl ErrorStatusStreamer for AccountUpdateSubscription {
@@ -172,6 +158,40 @@ impl ErrorStatusStreamer for SlotUpdateSubscription {
     }
 }
 
+struct BlockUpdateSubscription {
+    notification_sender: BlockUpdateSender,
+}
+
+impl ErrorStatusStreamer for BlockUpdateSubscription {
+    fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
+        self.notification_sender
+            .try_send(Err(status))
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
+    }
+}
+
+struct TransactionUpdateSubscription {
+    notification_sender: TransactionUpdateSender,
+}
+
+impl ErrorStatusStreamer for TransactionUpdateSubscription {
+    fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
+        self.notification_sender
+            .try_send(Err(status))
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
+    }
+}
+
 #[allow(clippy::enum_variant_names)]
 enum SubscriptionAddedEvent {
     AccountUpdateSubscription {
@@ -193,6 +213,14 @@ enum SubscriptionAddedEvent {
         uuid: Uuid,
         notification_sender: SlotUpdateSender,
     },
+    TransactionUpdateSubscription {
+        uuid: Uuid,
+        notification_sender: TransactionUpdateSender,
+    },
+    BlockUpdateSubscription {
+        uuid: Uuid,
+        notification_sender: BlockUpdateSender,
+    },
 }
 
 impl Debug for SubscriptionAddedEvent {
@@ -209,6 +237,12 @@ impl Debug for SubscriptionAddedEvent {
             }
             SubscriptionAddedEvent::ProgramUpdateSubscription { uuid, .. } => {
                 ("program_update_subscribe".to_string(), uuid)
+            }
+            SubscriptionAddedEvent::TransactionUpdateSubscription { uuid, .. } => {
+                ("transaction_update_subscribe".to_string(), uuid)
+            }
+            SubscriptionAddedEvent::BlockUpdateSubscription { uuid, .. } => {
+                ("block_update_subscribe".to_string(), uuid)
             }
         };
         writeln!(
@@ -231,6 +265,8 @@ enum SubscriptionClosedEvent {
     ProgramUpdateSubscription(Uuid),
     PartialAccountUpdateSubscription(Uuid),
     SlotUpdateSubscription(Uuid),
+    TransactionUpdateSubscription(Uuid),
+    BlockUpdateSubscription(Uuid),
 }
 
 #[derive(Error, Debug)]
@@ -278,9 +314,13 @@ impl GeyserService {
     pub fn new(
         service_config: GeyserServiceConfig,
         // Account updates streamed from the validator.
-        account_update_rx: Receiver<AccountUpdate>,
+        account_update_rx: Receiver<TimestampedAccountUpdate>,
         // Slot updates streamed from the validator.
-        slot_update_rx: Receiver<SlotUpdate>,
+        slot_update_rx: Receiver<TimestampedSlotUpdate>,
+        // Block metadata receiver
+        block_update_receiver: Receiver<TimestampedBlockUpdate>,
+        // Transaction updates
+        transaction_update_receiver: Receiver<TimestampedTransactionUpdate>,
         // This value is maintained in the upstream context.
         highest_write_slot: Arc<AtomicU64>,
     ) -> Self {
@@ -291,6 +331,8 @@ impl GeyserService {
         let t_hdl = Self::event_loop(
             account_update_rx,
             slot_update_rx,
+            block_update_receiver,
+            transaction_update_receiver,
             subscription_added_rx,
             subscription_closed_rx,
             heartbeat_tick,
@@ -316,8 +358,10 @@ impl GeyserService {
     ///     2. Cleanup closed subscriptions.
     ///     3. Receive geyser events and stream them to subscribers.
     fn event_loop(
-        account_update_rx: Receiver<AccountUpdate>,
-        slot_update_rx: Receiver<SlotUpdate>,
+        account_update_rx: Receiver<TimestampedAccountUpdate>,
+        slot_update_rx: Receiver<TimestampedSlotUpdate>,
+        block_update_receiver: Receiver<TimestampedBlockUpdate>,
+        transaction_update_receiver: Receiver<TimestampedTransactionUpdate>,
         subscription_added_rx: Receiver<SubscriptionAddedEvent>,
         subscription_closed_rx: Receiver<SubscriptionClosedEvent>,
         heartbeat_tick: Receiver<Instant>,
@@ -336,29 +380,26 @@ impl GeyserService {
                 > = HashMap::new();
                 let mut slot_update_subscriptions: HashMap<Uuid, SlotUpdateSubscription> = HashMap::new();
 
+                let mut transaction_update_subscriptions: HashMap<Uuid, TransactionUpdateSubscription> = HashMap::new();
+                let mut block_update_subscriptions: HashMap<Uuid, BlockUpdateSubscription> = HashMap::new();
+
                 loop {
                     crossbeam_channel::select! {
                         recv(heartbeat_tick) -> _ => {
                             debug!("sending heartbeats");
-                            let failed_subscription_ids = Self::send_heartbeats(&account_update_subscriptions);
-                            Self::drop_subscriptions(&failed_subscription_ids[..], &mut account_update_subscriptions);
-
                             let failed_subscription_ids = Self::send_heartbeats(&partial_account_update_subscriptions);
                             Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
-
-                            let failed_subscription_ids = Self::send_heartbeats(&program_update_subscriptions);
-                            Self::drop_subscriptions(&failed_subscription_ids[..], &mut program_update_subscriptions);
                         }
                         recv(subscription_added_rx) -> maybe_subscription_added => {
                             info!("received new subscription");
-                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
                                 error!("error adding new subscription: {}", e);
                                 return;
                             }
                         },
                         recv(subscription_closed_rx) -> maybe_subscription_closed => {
                             info!("closing subscription");
-                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
                                 error!("error closing existing subscription: {}", e);
                                 return;
                             }
@@ -389,10 +430,75 @@ impl GeyserService {
                                 },
                             }
                         },
+                        recv(block_update_receiver) -> maybe_block_update => {
+                            debug!("received block update");
+                            match Self::handle_block_update_event(maybe_block_update, &block_update_subscriptions) {
+                                Err(e) => {
+                                    error!("error handling a block update event: {}", e);
+                                    return;
+                                },
+                                Ok(failed_subscription_ids) => {
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut block_update_subscriptions);
+                                },
+                            }
+                        },
+                        recv(transaction_update_receiver) -> maybe_transaction_update => {
+                            debug!("received transaction update");
+                            match Self::handle_transaction_update_event(maybe_transaction_update, &transaction_update_subscriptions) {
+                                Err(e) => {
+                                    error!("error handling a transaction update event: {}", e);
+                                    return;
+                                },
+                                Ok(failed_subscription_ids) => {
+                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut transaction_update_subscriptions);
+                                },
+                            }
+                        },
                     }
                 }
             })
             .unwrap()
+    }
+
+    fn handle_block_update_event(
+        maybe_block_update: Result<TimestampedBlockUpdate, RecvError>,
+        subscriptions: &HashMap<Uuid, BlockUpdateSubscription>,
+    ) -> GeyserServiceResult<Vec<Uuid>> {
+        let block_update = maybe_block_update?;
+        Ok(subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.notification_sender.try_send(Ok(block_update.clone())),
+                    Err(TokioTrySendError::Closed(_))
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect())
+    }
+
+    fn handle_transaction_update_event(
+        maybe_transaction_update: Result<TimestampedTransactionUpdate, RecvError>,
+        subscriptions: &HashMap<Uuid, TransactionUpdateSubscription>,
+    ) -> GeyserServiceResult<Vec<Uuid>> {
+        let transaction_update = maybe_transaction_update?;
+        Ok(subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.notification_sender
+                        .try_send(Ok(transaction_update.clone())),
+                    Err(TokioTrySendError::Closed(_))
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect())
     }
 
     /// Handles adding new subscriptions.
@@ -402,6 +508,8 @@ impl GeyserService {
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
         program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
+        transaction_update_subscriptions: &mut HashMap<Uuid, TransactionUpdateSubscription>,
+        block_update_subscriptions: &mut HashMap<Uuid, BlockUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_added = maybe_subscription_added?;
         info!("new subscription: {:?}", subscription_added);
@@ -452,6 +560,28 @@ impl GeyserService {
                     },
                 );
             }
+            SubscriptionAddedEvent::TransactionUpdateSubscription {
+                uuid,
+                notification_sender,
+            } => {
+                transaction_update_subscriptions.insert(
+                    uuid,
+                    TransactionUpdateSubscription {
+                        notification_sender,
+                    },
+                );
+            }
+            SubscriptionAddedEvent::BlockUpdateSubscription {
+                uuid,
+                notification_sender,
+            } => {
+                block_update_subscriptions.insert(
+                    uuid,
+                    BlockUpdateSubscription {
+                        notification_sender,
+                    },
+                );
+            }
         }
 
         Ok(())
@@ -464,6 +594,8 @@ impl GeyserService {
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
         program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
+        transaction_update_subscriptions: &mut HashMap<Uuid, TransactionUpdateSubscription>,
+        block_update_subscriptions: &mut HashMap<Uuid, BlockUpdateSubscription>,
     ) -> GeyserServiceResult<()> {
         let subscription_closed = maybe_subscription_closed?;
         info!("closing subscription: {:?}", subscription_closed);
@@ -481,6 +613,12 @@ impl GeyserService {
             SubscriptionClosedEvent::ProgramUpdateSubscription(subscription_id) => {
                 let _ = program_update_subscriptions.remove(&subscription_id);
             }
+            SubscriptionClosedEvent::TransactionUpdateSubscription(subscription_id) => {
+                let _ = transaction_update_subscriptions.remove(&subscription_id);
+            }
+            SubscriptionClosedEvent::BlockUpdateSubscription(subscription_id) => {
+                let _ = block_update_subscriptions.remove(&subscription_id);
+            }
         }
 
         Ok(())
@@ -488,21 +626,20 @@ impl GeyserService {
 
     /// Streams account updates to subscribers.
     fn handle_account_update_event(
-        maybe_account_update: Result<AccountUpdate, RecvError>,
+        maybe_account_update: Result<TimestampedAccountUpdate, RecvError>,
         account_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &HashMap<Uuid, PartialAccountUpdateSubscription>,
         program_update_subscriptions: &HashMap<Uuid, AccountUpdateSubscription>,
     ) -> GeyserServiceResult<Vec<Uuid>> {
         let account_update = maybe_account_update?;
+        let update = account_update.account_update.as_ref().unwrap();
 
         let failed_account_update_sends: Vec<Uuid> = account_update_subscriptions
             .iter()
             .filter_map(|(uuid, sub)| {
-                if sub.accounts.contains(account_update.pubkey.as_slice())
+                if sub.accounts.contains(update.pubkey.as_slice())
                     && matches!(
-                        sub.notification_sender.try_send(Ok(MaybeAccountUpdate {
-                            msg: Some(Msg::AccountUpdate(account_update.clone())),
-                        })),
+                        sub.notification_sender.try_send(Ok(account_update.clone())),
                         Err(TokioTrySendError::Closed(_))
                     )
                 {
@@ -516,11 +653,9 @@ impl GeyserService {
         let failed_program_update_sends: Vec<Uuid> = program_update_subscriptions
             .iter()
             .filter_map(|(uuid, sub)| {
-                if sub.accounts.contains(account_update.owner.as_slice())
+                if sub.accounts.contains(update.owner.as_slice())
                     && matches!(
-                        sub.notification_sender.try_send(Ok(MaybeAccountUpdate {
-                            msg: Some(Msg::AccountUpdate(account_update.clone())),
-                        })),
+                        sub.notification_sender.try_send(Ok(account_update.clone())),
                         Err(TokioTrySendError::Closed(_))
                     )
                 {
@@ -531,15 +666,15 @@ impl GeyserService {
             })
             .collect();
 
+        let update = account_update.account_update.unwrap();
         let partial_account_update = PartialAccountUpdate {
-            slot: account_update.slot,
-            pubkey: account_update.pubkey,
-            owner: account_update.owner,
-            is_startup: account_update.is_startup,
-            seq: account_update.seq,
-            tx_signature: account_update.tx_signature,
-            replica_version: account_update.replica_version,
-            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+            slot: update.slot,
+            pubkey: update.pubkey,
+            owner: update.owner,
+            is_startup: update.is_startup,
+            seq: update.seq,
+            tx_signature: update.tx_signature,
+            replica_version: update.replica_version,
         };
 
         let failed_partial_account_update_sends: Vec<Uuid> = partial_account_update_subscriptions
@@ -579,7 +714,7 @@ impl GeyserService {
     /// Streams slot updates to subscribers
     /// Returns a vector of UUIDs that failed to send to due to the subscription being closed
     fn handle_slot_update_event(
-        maybe_slot_update: Result<SlotUpdate, RecvError>,
+        maybe_slot_update: Result<TimestampedSlotUpdate, RecvError>,
         slot_update_subscriptions: &HashMap<Uuid, SlotUpdateSubscription>,
     ) -> GeyserServiceResult<Vec<Uuid>> {
         let slot_update = maybe_slot_update?;
@@ -619,12 +754,12 @@ impl Geyser for GeyserService {
         &self,
         _request: Request<EmptyRequest>,
     ) -> Result<Response<GetHeartbeatIntervalResponse>, Status> {
-        Ok(Response::new(GetHeartbeatIntervalResponse {
+        return Ok(Response::new(GetHeartbeatIntervalResponse {
             heartbeat_interval_ms: self.service_config.heartbeat_interval_ms,
-        }))
+        }));
     }
 
-    type SubscribeAccountUpdatesStream = SubscriptionStream<Uuid, MaybeAccountUpdate>;
+    type SubscribeAccountUpdatesStream = SubscriptionStream<Uuid, TimestampedAccountUpdate>;
     async fn subscribe_account_updates(
         &self,
         request: Request<SubscribeAccountUpdatesRequest>,
@@ -673,7 +808,7 @@ impl Geyser for GeyserService {
         Ok(resp)
     }
 
-    type SubscribeProgramUpdatesStream = SubscriptionStream<Uuid, MaybeAccountUpdate>;
+    type SubscribeProgramUpdatesStream = SubscriptionStream<Uuid, TimestampedAccountUpdate>;
 
     async fn subscribe_program_updates(
         &self,
@@ -764,10 +899,10 @@ impl Geyser for GeyserService {
         Ok(resp)
     }
 
-    type SubscribeSlotUpdatesStream = SubscriptionStream<Uuid, SlotUpdate>;
+    type SubscribeSlotUpdatesStream = SubscriptionStream<Uuid, TimestampedSlotUpdate>;
     async fn subscribe_slot_updates(
         &self,
-        _request: Request<EmptyRequest>,
+        _request: Request<SubscribeSlotUpdateRequest>,
     ) -> Result<Response<Self::SubscribeSlotUpdatesStream>, Status> {
         let (subscription_tx, subscription_rx) =
             channel(self.service_config.subscriber_buffer_size);
@@ -798,6 +933,84 @@ impl Geyser for GeyserService {
             MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
         );
 
+        Ok(resp)
+    }
+
+    type SubscribeTransactionUpdatesStream = SubscriptionStream<Uuid, TimestampedTransactionUpdate>;
+
+    async fn subscribe_transaction_updates(
+        &self,
+        _request: Request<SubscribeTransactionUpdatesRequest>,
+    ) -> Result<Response<Self::SubscribeTransactionUpdatesStream>, Status> {
+        let (subscription_tx, subscription_rx) =
+            channel(self.service_config.subscriber_buffer_size);
+
+        let uuid = Uuid::new_v4();
+        self.subscription_added_tx
+            .try_send(SubscriptionAddedEvent::TransactionUpdateSubscription {
+                uuid,
+                notification_sender: subscription_tx,
+            })
+            .map_err(|e| {
+                error!(
+                    "failed to add subscribe_transaction_updates subscription: {}",
+                    e
+                );
+                Status::internal("error adding subscription")
+            })?;
+
+        let stream = SubscriptionStream::new(
+            subscription_rx,
+            uuid,
+            (
+                self.subscription_closed_sender.clone(),
+                SubscriptionClosedEvent::TransactionUpdateSubscription(uuid),
+            ),
+            "subscribe_transaction_updates",
+        );
+
+        let mut resp = Response::new(stream);
+        resp.metadata_mut().insert(
+            HIGHEST_WRITE_SLOT_HEADER,
+            MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
+        );
+        Ok(resp)
+    }
+
+    type SubscribeBlockUpdatesStream = SubscriptionStream<Uuid, TimestampedBlockUpdate>;
+    async fn subscribe_block_updates(
+        &self,
+        _request: Request<SubscribeBlockUpdatesRequest>,
+    ) -> Result<Response<Self::SubscribeBlockUpdatesStream>, Status> {
+        let (subscription_tx, subscription_rx) =
+            channel(self.service_config.subscriber_buffer_size);
+
+        let uuid = Uuid::new_v4();
+        self.subscription_added_tx
+            .try_send(SubscriptionAddedEvent::BlockUpdateSubscription {
+                uuid,
+                notification_sender: subscription_tx,
+            })
+            .map_err(|e| {
+                error!("failed to add subscribe_block_updates subscription: {}", e);
+                Status::internal("error adding subscription")
+            })?;
+
+        let stream = SubscriptionStream::new(
+            subscription_rx,
+            uuid,
+            (
+                self.subscription_closed_sender.clone(),
+                SubscriptionClosedEvent::BlockUpdateSubscription(uuid),
+            ),
+            "subscribe_block_updates",
+        );
+
+        let mut resp = Response::new(stream);
+        resp.metadata_mut().insert(
+            HIGHEST_WRITE_SLOT_HEADER,
+            MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
+        );
         Ok(resp)
     }
 }

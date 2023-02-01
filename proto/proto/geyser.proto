@@ -1,25 +1,9 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "confirmed_block.proto";
 
-package geyser;
-
-message Heartbeat {}
-message EmptyRequest {}
-
-
-message SubscribeAccountUpdatesRequest {
-  repeated bytes accounts = 1;
-}
-
-message SubscribeProgramsUpdatesRequest {
-  repeated bytes programs = 1;
-}
-
-message SubscribePartialAccountUpdatesRequest {
-  // If true, will not stream vote account updates.
-  bool skip_vote_accounts = 1;
-}
+package solana.geyser;
 
 message PartialAccountUpdate {
   // Slot this update occurred.
@@ -44,9 +28,6 @@ message PartialAccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 7;
-
-  // timestamp the message was generated
-  google.protobuf.Timestamp ts = 8;
 }
 
 message AccountUpdate {
@@ -84,9 +65,6 @@ message AccountUpdate {
 
   // AccountReplica version.
   uint32 replica_version = 11;
-
-  // timestamp the message was generated
-  google.protobuf.Timestamp ts = 12;
 }
 
 enum SlotUpdateStatus {
@@ -99,21 +77,78 @@ message SlotUpdate {
   uint64 slot = 1;
   optional uint64 parent_slot = 2;
   SlotUpdateStatus status = 3;
-  google.protobuf.Timestamp ts = 4;
 }
 
-message MaybeAccountUpdate {
-  oneof msg {
-    AccountUpdate account_update = 1;
-    Heartbeat hb = 2;
-  }
+message TimestampedSlotUpdate {
+  // Time at which the message was generated
+  google.protobuf.Timestamp ts = 1;
+  // Slot update
+  SlotUpdate slot_update = 2;
 }
+
+message TimestampedAccountUpdate {
+  // Time at which the message was generated
+  google.protobuf.Timestamp ts = 1;
+  // Account update
+  AccountUpdate account_update = 2;
+}
+
+message SubscribeTransactionUpdatesRequest {}
+
+message SubscribeBlockUpdatesRequest {}
 
 message MaybePartialAccountUpdate {
   oneof msg {
     PartialAccountUpdate partial_account_update = 1;
     Heartbeat hb = 2;
   }
+}
+
+message Heartbeat {}
+message EmptyRequest {}
+
+message BlockUpdate {
+  uint64  slot = 1;
+  string blockhash = 2;
+  repeated storage.ConfirmedBlock.Reward rewards = 3;
+  google.protobuf.Timestamp block_time = 4;
+  optional uint64 block_height = 5;
+}
+
+message TimestampedBlockUpdate {
+  // Time at which the message was generated
+  google.protobuf.Timestamp ts = 1;
+  // Block contents
+  BlockUpdate block_update = 2;
+}
+
+message TransactionUpdate {
+  uint64 slot = 1;
+  string signature = 2;
+  bool is_vote = 3;
+  uint64 tx_idx = 4;
+  storage.ConfirmedBlock.ConfirmedTransaction tx = 5;
+}
+
+message TimestampedTransactionUpdate {
+  google.protobuf.Timestamp ts = 1;
+  TransactionUpdate transaction = 2;
+}
+
+
+message SubscribeSlotUpdateRequest {}
+
+message SubscribeAccountUpdatesRequest {
+  repeated bytes accounts = 1;
+}
+
+message SubscribeProgramsUpdatesRequest {
+  repeated bytes programs = 1;
+}
+
+message SubscribePartialAccountUpdatesRequest {
+  // If true, will not stream vote account updates.
+  bool skip_vote_accounts = 1;
 }
 
 message GetHeartbeatIntervalResponse {
@@ -130,11 +165,11 @@ service Geyser {
   // Subscribes to account updates in the accounts database; additionally pings clients with empty heartbeats.
   // Upon initially connecting the client can expect a `highest_write_slot` set in the http headers.
   // Subscribe to account updates
-  rpc SubscribeAccountUpdates(SubscribeAccountUpdatesRequest) returns (stream MaybeAccountUpdate) {}
+  rpc SubscribeAccountUpdates(SubscribeAccountUpdatesRequest) returns (stream TimestampedAccountUpdate) {}
 
   // Subscribes to updates given a list of program IDs. When an account update comes in that's owned by a provided
   // program id, one will receive an update
-  rpc SubscribeProgramUpdates(SubscribeProgramsUpdatesRequest) returns (stream MaybeAccountUpdate) {}
+  rpc SubscribeProgramUpdates(SubscribeProgramsUpdatesRequest) returns (stream TimestampedAccountUpdate) {}
 
   // Functions similarly to `SubscribeAccountUpdates`, but consumes less bandwidth.
   // Returns the highest slot seen thus far in the http headers named `highest-write-slot`.
@@ -142,5 +177,11 @@ service Geyser {
 
   // Subscribes to slot updates.
   // Returns the highest slot seen thus far in the http headers named `highest-write-slot`.
-  rpc SubscribeSlotUpdates(EmptyRequest) returns (stream SlotUpdate) {}
+  rpc SubscribeSlotUpdates(SubscribeSlotUpdateRequest) returns (stream TimestampedSlotUpdate) {}
+
+  // Subscribes to transaction updates.
+  rpc SubscribeTransactionUpdates(SubscribeTransactionUpdatesRequest) returns (stream TimestampedTransactionUpdate) {}
+
+  // Subscribes to block updates.
+  rpc SubscribeBlockUpdates(SubscribeBlockUpdatesRequest) returns (stream TimestampedBlockUpdate) {}
 }
