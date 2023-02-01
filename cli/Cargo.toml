@@ -11,8 +11,12 @@ clap = { version = "4.0.32", features = ["derive", "env"] }
 futures-util = "0.3.25"
 geyser-grpc-plugin-client = { path = "../client" }
 jito-geyser-protos = { path = "../proto" }
+jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-sdk", optional = true }
 prost-types = "0.11.6"
 solana-sdk = "~1.13"
 tokio = { version = "1.14.1", features = ["full"] }
 tonic = { version = "0.8.3", features = ["tls", "tls-roots", "tls-webpki-roots"] }
 uuid = { version = "1.2.2", features = ["v4"] }
+
+[features]
+jito-solana = ["jito-solana-sdk"]

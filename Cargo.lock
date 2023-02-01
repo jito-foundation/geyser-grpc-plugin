@@ -1584,6 +1584,7 @@ dependencies = [
  "jito-geyser-protos",
  "prost-types 0.11.6",
  "solana-sdk 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-sdk 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "tokio",
  "tonic",
  "uuid",
