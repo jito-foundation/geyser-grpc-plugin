@@ -10,10 +10,16 @@ bincode = "1.3.3"
 prost = "0.11.6"
 prost-types = "0.11.6"
 serde = "1.0.152"
+jito-solana-account-decoder = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-account-decoder", optional = true }
+jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-sdk", optional = true }
+jito-solana-transaction-status = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-transaction-status", optional = true }
 solana-account-decoder = "~1.13"
 solana-sdk = "~1.13"
 solana-transaction-status = "~1.13"
 tonic = "0.8.3"
+
+[features]
+jito-solana = ["jito-solana-account-decoder", "jito-solana-sdk", "jito-solana-transaction-status"]
 
 [build-dependencies]
 tonic-build = "0.8.4"

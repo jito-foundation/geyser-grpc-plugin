@@ -1244,8 +1244,10 @@ dependencies = [
  "solana-program 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "solana-sdk 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-sdk 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
- "solana-storage-proto",
+ "solana-storage-proto 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-storage-proto 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "solana-transaction-status 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-transaction-status 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "solana-vote-program 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-vote-program 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "thiserror",
@@ -1596,8 +1598,11 @@ dependencies = [
  "prost-types 0.11.6",
  "serde",
  "solana-account-decoder 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-account-decoder 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "solana-sdk 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-sdk 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "solana-transaction-status 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-transaction-status 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "tonic",
  "tonic-build 0.8.4",
 ]
@@ -3188,6 +3193,21 @@ dependencies = [
  "solana-account-decoder 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-sdk 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "solana-transaction-status 1.13.6 (registry+https://github.com/rust-lang/crates.io-index)",
+ "tonic-build 0.7.2",
+]
+
+[[package]]
+name = "solana-storage-proto"
+version = "1.13.6"
+source = "git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito#35cd2ee57470c1cba765f83951a07e906be9fe46"
+dependencies = [
+ "bincode",
+ "bs58 0.4.0",
+ "prost 0.10.4",
+ "serde",
+ "solana-account-decoder 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
+ "solana-sdk 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
+ "solana-transaction-status 1.13.6 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.13.6-jito)",
  "tonic-build 0.7.2",
 ]
 

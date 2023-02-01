@@ -19,6 +19,8 @@ jito-solana-logger = { git = "https://github.com/jito-foundation/jito-solana.git
 jito-solana-metrics = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-metrics", optional = true }
 jito-solana-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-program", optional = true }
 jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-sdk", optional = true }
+jito-solana-storage-proto = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-storage-proto", optional = true }
+jito-solana-transaction-status = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-transaction-status", optional = true }
 jito-solana-vote-program = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.13.6-jito", package = "solana-vote-program", optional = true }
 log = "0.4.14"
 once_cell = "1.16.0"
@@ -43,7 +45,7 @@ tonic = "0.8.3"
 uuid = { version = "1.2.2", features = ["v4", "fast-rng"] }
 
 [features]
-jito-solana = ["jito-solana-geyser-plugin-interface", "jito-solana-logger", "jito-solana-metrics", "jito-solana-program", "jito-solana-sdk", "jito-solana-vote-program"]
+jito-solana = ["jito-solana-geyser-plugin-interface", "jito-solana-logger", "jito-solana-metrics", "jito-solana-program", "jito-solana-sdk", "jito-solana-vote-program", "jito-solana-storage-proto", "jito-solana-transaction-status"]
 
 [build-dependencies]
 tonic-build = "0.8.4"
