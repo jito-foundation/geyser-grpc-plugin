@@ -829,9 +829,11 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 TransactionError::InsufficientFundsForRent { .. } => {
                     tx_by_addr::TransactionErrorType::InsufficientFundsForRent
                 }
+                #[cfg(feature = "jito-solana")]
                 TransactionError::BundleNotContinuous => {
                     tx_by_addr::TransactionErrorType::BundleNotContinuous
                 }
+                #[cfg(feature = "jito-solana")]
                 TransactionError::SkippedExecution => {
                     tx_by_addr::TransactionErrorType::SkippedExecution
                 }
