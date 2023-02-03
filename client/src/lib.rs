@@ -1,4 +1,5 @@
 pub mod geyser_consumer;
+pub mod interceptor;
 pub mod types;
 
 #[cfg(not(feature = "jito-solana"))]
@@ -16,10 +17,11 @@ use jito_geyser_protos::solana::geyser::geyser_client::GeyserClient;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
-use crate::geyser_consumer::GeyserConsumer;
+use crate::{geyser_consumer::GeyserConsumer, interceptor::GrpcInterceptor};
 
 pub async fn connect(
     geyser_addr: String,
+    access_token: String,
     tls_config: Option<ClientTlsConfig>,
     exit: Arc<AtomicBool>,
 ) -> GeyserConsumer {
@@ -33,7 +35,8 @@ pub async fn connect(
     .await
     .expect("failed to connect");
 
-    let c = GeyserClient::new(ch);
+    let interceptor = GrpcInterceptor { access_token };
+    let c = GeyserClient::with_interceptor(ch, interceptor);
 
     GeyserConsumer::new(c, exit)
 }
