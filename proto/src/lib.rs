@@ -1,6 +1,14 @@
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_account_decoder as solana_account_decoder;
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_sdk as solana_sdk;
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_transaction_status as solana_transaction_status;
+
 use solana_account_decoder::{
     parse_token::{real_number_string_trimmed, UiTokenAmount},
     StringAmount,

@@ -14,6 +14,12 @@ solana-account-decoder = "=1.14.13"
 solana-sdk = "=1.14.13"
 solana-transaction-status = "=1.14.13"
 tonic = "0.8.3"
+jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-sdk", optional = true }
+jito-solana-transaction-status = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-transaction-status", optional = true }
+jito-solana-account-decoder = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.13-jito", package = "solana-account-decoder", optional = true }
 
 [build-dependencies]
 tonic-build = "0.8.4"
+
+[features]
+jito-solana = ["jito-solana-sdk", "jito-solana-transaction-status", "jito-solana-account-decoder"]
