@@ -28,12 +28,12 @@ use tokio::{
     sync::mpsc::UnboundedSender,
     time::{interval, Instant},
 };
-use tonic::{transport::Channel, Response, Status};
+use tonic::{codegen::InterceptedService, transport::Channel, Response, Status};
 
 use crate::{
     geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
     types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
-    Pubkey, Slot,
+    GrpcInterceptor, Pubkey, Slot,
 };
 
 #[derive(Error, Debug)]
@@ -86,14 +86,17 @@ pub struct AccountWriteSeq {
 #[derive(Clone)]
 pub struct GeyserConsumer {
     /// Geyser client.
-    client: GeyserClient<Channel>,
+    client: GeyserClient<InterceptedService<Channel, GrpcInterceptor>>,
 
     /// Exit signal.
     exit: Arc<AtomicBool>,
 }
 
 impl GeyserConsumer {
-    pub fn new(client: GeyserClient<Channel>, exit: Arc<AtomicBool>) -> Self {
+    pub fn new(
+        client: GeyserClient<InterceptedService<Channel, GrpcInterceptor>>,
+        exit: Arc<AtomicBool>,
+    ) -> Self {
         Self { client, exit }
     }
 
