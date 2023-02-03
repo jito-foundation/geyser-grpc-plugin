@@ -5,6 +5,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use futures_util::StreamExt;
+use geyser_grpc_plugin_client::interceptor::GrpcInterceptor;
 use jito_geyser_protos::solana::geyser::{
     geyser_client::GeyserClient, EmptyRequest, SlotUpdateStatus, SubscribeAccountUpdatesRequest,
     SubscribeBlockUpdatesRequest, SubscribePartialAccountUpdatesRequest,
@@ -14,9 +15,8 @@ use jito_geyser_protos::solana::geyser::{
 use prost_types::Timestamp;
 use solana_sdk::pubkey::Pubkey;
 use tonic::{
-    service::Interceptor,
     transport::{ClientTlsConfig, Endpoint},
-    Status, Streaming,
+    Streaming,
 };
 use uuid::Uuid;
 
@@ -67,20 +67,6 @@ enum Commands {
     Blocks,
 }
 
-struct GrpcInterceptor {
-    access_token: Uuid,
-}
-
-impl Interceptor for GrpcInterceptor {
-    fn call(&mut self, mut request: tonic::Request<()>) -> Result<tonic::Request<()>, Status> {
-        request.metadata_mut().insert(
-            "access-token",
-            self.access_token.to_string().parse().unwrap(),
-        );
-        Ok(request)
-    }
-}
-
 #[tokio::main]
 async fn main() {
     let args: Args = Args::parse();
@@ -98,7 +84,7 @@ async fn main() {
 
     // The access token is provided as "access-token": "{uuid_v4}" in the request header
     let interceptor = GrpcInterceptor {
-        access_token: args.access_token,
+        access_token: args.access_token.to_string(),
     };
     let mut client = GeyserClient::with_interceptor(channel, interceptor);
 
