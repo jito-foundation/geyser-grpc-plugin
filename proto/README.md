@@ -1,7 +1,24 @@
 # About
 - Most of these protobufs are copied from Solana Lab's repository.
 
-## Pulling in updates
+# Using the library
+
+**Adding to Cargo.toml**
+```toml
+jito-geyser-protos = "0.0.2"
+```
+
+**Importing**
+```rust
+use jito_geyser_protos::solana::storage::confirmed_block::ConfirmedBlock;
+```
+
+Note:
+- Supports any solana library ~v1.14.
+
+### How to pull in Solana Labs changes
+
+**Pulling in updates**
 - confirmed_block.proto and transaction_by_addr.proto are untouched.
 - Added the following to lib.rs (previously under generated  in convert.rs)
 ```rust

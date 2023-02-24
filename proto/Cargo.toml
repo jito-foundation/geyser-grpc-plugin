@@ -1,18 +1,19 @@
 [package]
 name = "jito-geyser-protos"
-version = "0.1.0"
+version = "0.0.2"
 authors = ["Jito Foundation <team@jito.network>"]
 license = "Apache-2.0"
 edition = "2021"
+description = "Jito's Solana geyser protobufs and helper libraries"
 
 [dependencies]
 bincode = "1.3.3"
 prost = "0.11.6"
 prost-types = "0.11.6"
 serde = "1.0.152"
-solana-account-decoder = "=1.14.13"
-solana-sdk = "=1.14.13"
-solana-transaction-status = "=1.14.13"
+solana-account-decoder = "~1.14"
+solana-sdk = "~1.14"
+solana-transaction-status = "~1.14"
 tonic = "0.8.3"
 
 [build-dependencies]
