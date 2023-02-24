@@ -1595,7 +1595,7 @@ dependencies = [
 
 [[package]]
 name = "jito-geyser-protos"
-version = "0.0.1"
+version = "0.0.2"
 dependencies = [
  "bincode",
  "prost",
