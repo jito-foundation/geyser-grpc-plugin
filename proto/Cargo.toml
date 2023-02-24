@@ -4,6 +4,7 @@ version = "0.0.1"
 authors = ["Jito Foundation <team@jito.network>"]
 license = "Apache-2.0"
 edition = "2021"
+description = "Jito's Solana geyser protobufs and helper libraries"
 
 [dependencies]
 bincode = "1.3.3"
