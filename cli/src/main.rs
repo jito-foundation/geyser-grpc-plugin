@@ -30,7 +30,7 @@ struct Args {
     #[clap(long, env, required = false)]
     access_token: Uuid,
 
-    #[command(subcommand)]
+    #[clap(subcommand)]
     command: Commands,
 }
 
