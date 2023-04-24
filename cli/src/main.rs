@@ -27,7 +27,7 @@ struct Args {
     url: String,
 
     /// access token uuid
-    #[arg(long, env, required = false)]
+    #[arg(long, env)]
     access_token: Uuid,
 
     #[command(subcommand)]
