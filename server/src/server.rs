@@ -9,8 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
-use crossbeam_channel::{tick, RecvError};
+use crossbeam_channel::{tick, unbounded, Receiver, RecvError, Sender};
 use jito_geyser_protos::solana::geyser::{
     geyser_server::Geyser, maybe_partial_account_update, EmptyRequest,
     GetHeartbeatIntervalResponse, Heartbeat, MaybePartialAccountUpdate, PartialAccountUpdate,
@@ -388,7 +387,7 @@ impl GeyserService {
                         recv(heartbeat_tick) -> _ => {
                             debug!("sending heartbeats");
                             let failed_subscription_ids = Self::send_heartbeats(&partial_account_update_subscriptions);
-                            Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
+                            Self::drop_subscriptions(&failed_subscription_ids, &mut partial_account_update_subscriptions);
                         }
                         recv(subscription_added_rx) -> maybe_subscription_added => {
                             info!("received new subscription");
@@ -412,9 +411,9 @@ impl GeyserService {
                                     return;
                                 },
                                 Ok(failed_subscription_ids) => {
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut account_update_subscriptions);
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut partial_account_update_subscriptions);
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut program_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut account_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut partial_account_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut program_update_subscriptions);
                                 },
                             }
                         },
@@ -426,7 +425,7 @@ impl GeyserService {
                                     return;
                                 },
                                 Ok(failed_subscription_ids) => {
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut slot_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut slot_update_subscriptions);
                                 },
                             }
                         },
@@ -438,7 +437,7 @@ impl GeyserService {
                                     return;
                                 },
                                 Ok(failed_subscription_ids) => {
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut block_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut block_update_subscriptions);
                                 },
                             }
                         },
@@ -450,7 +449,7 @@ impl GeyserService {
                                     return;
                                 },
                                 Ok(failed_subscription_ids) => {
-                                    Self::drop_subscriptions(&failed_subscription_ids[..], &mut transaction_update_subscriptions);
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut transaction_update_subscriptions);
                                 },
                             }
                         },

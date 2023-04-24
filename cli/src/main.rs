@@ -21,16 +21,16 @@ use tonic::{
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
+#[command(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, env, default_value = "mainnet.rpc.jito.wtf")]
+    #[arg(long, env, default_value = "mainnet.rpc.jito.wtf")]
     url: String,
 
     /// access token uuid
-    #[clap(long, env, required = false)]
+    #[arg(long, env, required = false)]
     access_token: Uuid,
 
-    #[clap(subcommand)]
+    #[command(subcommand)]
     command: Commands,
 }
 
@@ -43,14 +43,14 @@ enum Commands {
     /// the programs have a change in state
     Programs {
         /// A space-separated list of programs to subscribe to
-        #[clap(required = true)]
+        #[arg(required = true)]
         programs: Vec<String>,
     },
 
     /// Subscribe to a set of accounts
     Accounts {
         /// A space-separated list of accounts to subscribe to
-        #[clap(required = true)]
+        #[arg(required = true)]
         accounts: Vec<String>,
     },
 
@@ -235,7 +235,7 @@ async fn print_account_updates(mut response: Streaming<TimestampedAccountUpdate>
                     "# {:?} slot: {:?} pubkey: {:?} clock skew: {:.3}s",
                     account_update.seq,
                     account_update.slot,
-                    Pubkey::new(account_update.pubkey.as_slice()),
+                    Pubkey::try_from(account_update.pubkey).unwrap(),
                     skew
                 );
             }

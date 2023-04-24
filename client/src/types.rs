@@ -48,8 +48,8 @@ impl AccountUpdateNotification for AccountUpdate {
 
 impl From<geyser::AccountUpdate> for AccountUpdate {
     fn from(proto: geyser::AccountUpdate) -> Self {
-        let pubkey = Pubkey::new(&proto.pubkey[..]);
-        let owner = Pubkey::new(&proto.owner[..]);
+        let pubkey = Pubkey::try_from(proto.pubkey).unwrap();
+        let owner = Pubkey::try_from(proto.owner).unwrap();
 
         Self {
             pubkey,
@@ -92,7 +92,7 @@ impl AccountUpdateNotification for PartialAccountUpdate {
 
 impl From<geyser::PartialAccountUpdate> for PartialAccountUpdate {
     fn from(proto: geyser::PartialAccountUpdate) -> Self {
-        let pubkey = Pubkey::new(&proto.pubkey[..]);
+        let pubkey = Pubkey::try_from(proto.pubkey).unwrap();
 
         Self {
             pubkey,
