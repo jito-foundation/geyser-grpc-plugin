@@ -297,7 +297,7 @@ impl From<confirmed_block::Message> for VersionedMessage {
         let account_keys = value
             .account_keys
             .into_iter()
-            .map(|key| Pubkey::new(&key))
+            .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
             .collect();
         let recent_blockhash = Hash::new(&value.recent_blockhash);
         let instructions = value.instructions.into_iter().map(|ix| ix.into()).collect();
@@ -491,11 +491,11 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
         let loaded_addresses = LoadedAddresses {
             writable: loaded_writable_addresses
                 .into_iter()
-                .map(|key| Pubkey::new(&key))
+                .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
                 .collect(),
             readonly: loaded_readonly_addresses
                 .into_iter()
-                .map(|key| Pubkey::new(&key))
+                .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
                 .collect(),
         };
         let return_data = if return_data_none {
@@ -597,7 +597,7 @@ impl From<MessageAddressTableLookup> for confirmed_block::MessageAddressTableLoo
 impl From<confirmed_block::MessageAddressTableLookup> for MessageAddressTableLookup {
     fn from(value: confirmed_block::MessageAddressTableLookup) -> Self {
         Self {
-            account_key: Pubkey::new(&value.account_key),
+            account_key: Pubkey::try_from(value.account_key).expect("Failed to parse Pubkey"),
             writable_indexes: value.writable_indexes,
             readonly_indexes: value.readonly_indexes,
         }
@@ -616,7 +616,7 @@ impl From<TransactionReturnData> for confirmed_block::ReturnData {
 impl From<confirmed_block::ReturnData> for TransactionReturnData {
     fn from(value: confirmed_block::ReturnData) -> Self {
         Self {
-            program_id: Pubkey::new(&value.program_id),
+            program_id: Pubkey::try_from(value.program_id).expect("Failed to parse Pubkey"),
             data: value.data,
         }
     }
@@ -1120,7 +1120,7 @@ impl TryFrom<tx_by_addr::TransactionByAddr> for Vec<TransactionByAddrInfo> {
 
 #[cfg(test)]
 mod test {
-    use enum_iterator::IntoEnumIterator;
+    use solana_sdk::bs58;
 
     use super::*;
 
@@ -1748,7 +1748,15 @@ mod test {
     fn test_error_enums() {
         let ix_index = 1;
         let custom_error = 42;
-        for error in tx_by_addr::TransactionErrorType::into_enum_iter() {
+        let transaction_error_types =
+            (0..32) // ignore BundleNotContinuous and SkippedExecution
+                .filter_map(tx_by_addr::TransactionErrorType::from_i32)
+                .collect::<Vec<tx_by_addr::TransactionErrorType>>();
+        let instruction_error_types = (0..256)
+            .filter_map(tx_by_addr::InstructionErrorType::from_i32)
+            .collect::<Vec<tx_by_addr::InstructionErrorType>>();
+
+        for error in transaction_error_types {
             match error {
                 tx_by_addr::TransactionErrorType::DuplicateInstruction
                 | tx_by_addr::TransactionErrorType::InsufficientFundsForRent => {
@@ -1766,7 +1774,7 @@ mod test {
                     assert_eq!(tx_by_addr_error, transaction_error.into());
                 }
                 tx_by_addr::TransactionErrorType::InstructionError => {
-                    for ix_error in tx_by_addr::InstructionErrorType::into_enum_iter() {
+                    for ix_error in instruction_error_types.clone() {
                         if ix_error != tx_by_addr::InstructionErrorType::Custom {
                             let tx_by_addr_error = tx_by_addr::TransactionError {
                                 transaction_error: error as i32,

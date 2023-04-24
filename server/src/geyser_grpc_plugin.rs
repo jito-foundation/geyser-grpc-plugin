@@ -218,8 +218,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         debug!(
             "Streaming AccountUpdate {:?} with owner {:?} at slot {:?}",
-            bs58::encode(&pubkey[..]).into_string(),
-            bs58::encode(&owner[..]).into_string(),
+            bs58::encode(&pubkey).into_string(),
+            bs58::encode(&owner).into_string(),
             slot,
         );
 

@@ -15,7 +15,7 @@ use solana_transaction_status::{
 
 pub mod convert;
 
-// NOTE: Jito Labs addeed
+// NOTE: Jito Labs added
 pub mod solana {
     pub mod geyser {
         tonic::include_proto!("solana.geyser");
