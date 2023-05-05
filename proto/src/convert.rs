@@ -168,6 +168,12 @@ impl From<TransactionWithStatusMeta> for confirmed_block::ConfirmedTransaction {
     fn from(tx_with_meta: TransactionWithStatusMeta) -> Self {
         match tx_with_meta {
             TransactionWithStatusMeta::MissingMetadata(transaction) => Self {
+                account_keys: transaction
+                    .message
+                    .account_keys
+                    .iter()
+                    .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(key).into())
+                    .collect(),
                 transaction: Some(confirmed_block::Transaction::from(transaction)),
                 meta: None,
             },
@@ -179,6 +185,11 @@ impl From<TransactionWithStatusMeta> for confirmed_block::ConfirmedTransaction {
 impl From<VersionedTransactionWithStatusMeta> for confirmed_block::ConfirmedTransaction {
     fn from(value: VersionedTransactionWithStatusMeta) -> Self {
         Self {
+            account_keys: value
+                .account_keys()
+                .iter()
+                .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(key).into())
+                .collect(),
             transaction: Some(value.transaction.into()),
             meta: Some(value.meta.into()),
         }

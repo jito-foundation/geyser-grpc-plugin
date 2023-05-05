@@ -15,6 +15,7 @@ message ConfirmedBlock {
 message ConfirmedTransaction {
     Transaction transaction = 1;
     TransactionStatusMeta meta = 2;
+    repeated bytes account_keys = 3;
 }
 
 message Transaction {

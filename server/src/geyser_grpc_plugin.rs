@@ -27,6 +27,7 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
+use solana_program::pubkey::Pubkey;
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::transport::Server;
 
@@ -295,6 +296,13 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     tx_idx: u64::MAX,
                     tx: Some(ConfirmedTransaction {
                         transaction: Some(tx.transaction.to_versioned_transaction().into()),
+                        account_keys: tx
+                            .transaction
+                            .message()
+                            .account_keys()
+                            .iter()
+                            .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(&key).into())
+                            .collect(),
                         meta: Some(tx.transaction_status_meta.clone().into()),
                     }),
                 }),
@@ -308,6 +316,13 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     tx_idx: tx.index as u64,
                     tx: Some(ConfirmedTransaction {
                         transaction: Some(tx.transaction.to_versioned_transaction().into()),
+                        account_keys: tx
+                            .transaction
+                            .message()
+                            .account_keys()
+                            .iter()
+                            .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(&key).into())
+                            .collect(),
                         meta: Some(tx.transaction_status_meta.clone().into()),
                     }),
                 }),
