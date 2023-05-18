@@ -1,4 +1,5 @@
-FROM rust:1.64.0
+FROM rust:1.60.0
+# keep in sync with https://github.com/solana-labs/solana/blob/db9fdf5811ecd8a84ea446591854974d386681ef/ci/rust-version.sh#L21
 
 RUN set -x \
  && apt update \
