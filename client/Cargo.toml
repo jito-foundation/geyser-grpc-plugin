@@ -9,7 +9,7 @@ edition = "2021"
 jito-geyser-protos = { path = "../proto" }
 jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.17-jito", package = "solana-sdk", optional = true }
 log = "0.4"
-lru = "0.10.0"
+lru = "0.8" # keep old version due to MSRV of 1.60
 prost = "0.11.9"
 prost-types = "0.11.9"
 rand = "0.8"

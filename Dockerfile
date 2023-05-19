@@ -1,4 +1,6 @@
-FROM rust:1.64.0
+FROM rust:1.60.0
+# keep rust version in sync to avoid re-downloading rust
+# use https://github.com/solana-labs/solana/blob/db9fdf5811ecd8a84ea446591854974d386681ef/ci/rust-version.sh#L21
 
 RUN set -x \
  && apt update \
