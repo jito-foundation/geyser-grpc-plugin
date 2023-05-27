@@ -20,7 +20,7 @@ if ! command -v "${PODMAN_CMD}" >/dev/null 2>&1; then
     export DOCKER_BUILDKIT=1
     CONTAINER_CMD=${DOCKER_CMD}
   else
-    echo "could not find a container runtime executeable!"
+    echo "could not find a container runtime executable!"
     echo "please make sure ${PODMAN_CMD} or ${DOCKER_CMD} is installed and in the path variable."
     exit 1
   fi

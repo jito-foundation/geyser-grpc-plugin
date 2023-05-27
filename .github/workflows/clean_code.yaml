@@ -1,0 +1,29 @@
+name: Clean Code Check
+on:
+  workflow_call:
+
+jobs:
+  clippy_and_udeps_check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
+
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          caller-workflow-name: clippy_and_udeps_check
+
+      - name: Clippy Check
+        run: cargo +nightly clippy --all-targets
+
+      - uses: actions-rs/cargo@v1
+        with:
+          command: install
+          args: cargo-udeps --locked
+
+      - name: Run cargo udeps
+        uses: actions-rs/cargo@v1
+        with:
+          command: udeps
