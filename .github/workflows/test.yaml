@@ -16,4 +16,4 @@ jobs:
         caller-workflow-name: test
 
     - name: Run tests
-      run: RUST_LOG=info cargo test --all-targets --all-features
+      run: cargo test --all-features --all-targets

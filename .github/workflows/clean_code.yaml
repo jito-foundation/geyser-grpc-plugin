@@ -16,14 +16,7 @@ jobs:
           caller-workflow-name: clippy_and_udeps_check
 
       - name: Clippy Check
-        run: cargo +nightly clippy --all-targets
+        run: cargo +nightly clippy --all-features --all-targets --tests
 
-      - uses: actions-rs/cargo@v1
-        with:
-          command: install
-          args: cargo-udeps --locked
-
-      - name: Run cargo udeps
-        uses: actions-rs/cargo@v1
-        with:
-          command: udeps
+      - name: Clippy udeps
+        run: cargo +nightly udeps --workspace --all-features --all-targets --tests
