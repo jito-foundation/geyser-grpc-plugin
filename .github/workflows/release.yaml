@@ -11,7 +11,7 @@ jobs:
     uses: ./.github/workflows/clean_code.yaml
 
   run_tests:
-    needs: build_images
+    needs: clean_code_check
     uses: ./.github/workflows/test.yaml
 
   push_artifacts:
