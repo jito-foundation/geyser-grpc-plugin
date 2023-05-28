@@ -19,7 +19,7 @@ jobs:
         continue-on-error: true
 
       - name: Build containers
-        run: docker compose build --progress=plain
+        run: docker build -t jitolabs/geyser-grpc-plugin:${{ inputs.TAG }} . --progress=plain
         env:
           COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1

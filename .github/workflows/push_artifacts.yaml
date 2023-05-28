@@ -1,11 +1,6 @@
 name: Push Artifacts
 on:
   workflow_call:
-    secrets:
-      DOCKERHUB_USER:
-        required: true
-      DOCKERHUB_PWD:
-        required: true
     inputs:
       TAG:
         required: true
@@ -21,30 +16,21 @@ jobs:
           submodules: 'recursive'
 
       - name: Build containers
-        run: docker compose build --progress=plain
+        run: docker build -t jitolabs/geyser-grpc-plugin:${{ inputs.TAG }} . --progress=plain
         env:
           COMPOSE_DOCKER_CLI_BUILD: 1
           DOCKER_BUILDKIT: 1
           ORG: jitolabs
           TAG: ${{ inputs.TAG }}
 
-      - name: Login to DockerHub
-        uses: docker/login-action@v2
-        with:
-          username: ${{ secrets.DOCKERHUB_USER }}
-          password: ${{ secrets.DOCKERHUB_PWD }}
-
-      - name: Push relayer image
-        run: docker push jitolabs/jito-transaction-relayer:${{ inputs.TAG }}
-
       - name: Copy artifact from container
         run: |
-          docker run --rm --entrypoint cat jitolabs/jito-transaction-relayer:${{ inputs.TAG }} /app/jito-transaction-relayer > ./jito-transaction-relayer-x86_64-unknown-linux-gnu
+          docker run --rm --entrypoint cat jitolabs/geyser-grpc-plugin:${{ inputs.TAG }} /geyser-grpc-plugin/container-output/libgeyser_grpc_plugin_server.so > libgeyser_grpc_plugin_server.so
           ls -lh .
-          file ./jito-transaction-relayer-x86_64-unknown-linux-gnu
+          file libgeyser_grpc_plugin_server.so
 
       - name: Create Release with artifact
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          files: ./jito-transaction-relayer-x86_64-unknown-linux-gnu
+          files: ./libgeyser_grpc_plugin_server.so

@@ -18,11 +18,8 @@ jobs:
     needs: build_images
     uses: ./.github/workflows/test.yaml
 
-  push_images:
+  push_artifacts:
     needs: run_tests
     uses: ./.github/workflows/push_artifacts.yaml
     with:
       TAG: "latest"
-    secrets:
-      DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USER }}
-      DOCKERHUB_PWD: ${{ secrets.DOCKERHUB_PWD }}
