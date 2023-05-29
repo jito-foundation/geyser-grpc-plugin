@@ -15,8 +15,14 @@ jobs:
         with:
           caller-workflow-name: clippy_and_udeps_check
 
-      - name: Clippy Check
-        run: cargo +nightly clippy --all-features --all-targets --tests
+      - name: Setup Rust tools
+        run: cargo install cargo-sort cargo-udeps --locked
+
+      - name: Cargo sort
+        run: cargo +stable sort --workspace --check
 
       - name: Clippy udeps
         run: cargo +nightly udeps --workspace --all-features --all-targets --tests
+
+      - name: Clippy Check
+        run: cargo +nightly clippy --all-features --all-targets --tests
