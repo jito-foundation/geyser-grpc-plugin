@@ -1514,8 +1514,11 @@ dependencies = [
  "prost-types",
  "serde",
  "solana-account-decoder 1.14.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-account-decoder 1.14.17 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.14.17-jito)",
  "solana-sdk 1.14.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-sdk 1.14.17 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.14.17-jito)",
  "solana-transaction-status 1.14.17 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-transaction-status 1.14.17 (git+https://github.com/jito-foundation/jito-solana.git?tag=v1.14.17-jito)",
  "tonic",
  "tonic-build",
 ]

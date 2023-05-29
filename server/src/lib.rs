@@ -26,4 +26,4 @@ extern crate jito_solana_program as solana_program;
 #[cfg(feature = "jito-solana")]
 extern crate jito_solana_sdk as solana_sdk;
 #[cfg(feature = "jito-solana")]
-extern crate jito_solana_vote_program as solana_vote_progrma;
+extern crate jito_solana_vote_program as solana_vote_program;
