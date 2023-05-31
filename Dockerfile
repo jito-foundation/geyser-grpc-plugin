@@ -1,19 +1,18 @@
-FROM rust:1.60.0
+FROM rust:1.60-slim-bullseye
 # keep rust version in sync to avoid re-downloading rust
 # use https://github.com/solana-labs/solana/blob/db9fdf5811ecd8a84ea446591854974d386681ef/ci/rust-version.sh#L21
 
 RUN set -x \
- && apt update \
- && apt install -y \
-      clang \
-      cmake \
-      libudev-dev \
-      make \
-      unzip \
-      libssl-dev \
-      pkg-config \
-      zlib1g-dev \
-      make \
+    && apt-get -qq update \
+    && apt-get -qq -y install \
+    clang \
+    cmake \
+    libudev-dev \
+    unzip \
+    libssl-dev \
+    pkg-config \
+    zlib1g-dev \
+    curl \
  && rustup component add rustfmt \
  && rustup component add clippy \
  && rustc --version \
