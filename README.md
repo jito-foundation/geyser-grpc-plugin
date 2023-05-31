@@ -3,10 +3,10 @@
 A lightweight gRPC service for streaming account and slot updates to subscribers.
 
 ## Setup
-1. Compile artifact or [download release](https://github.com/jito-foundation/geyser-grpc-plugin/releases) for your specific validator version
+1. [Compile](#helper-scripts) or [download a release](https://github.com/jito-foundation/geyser-grpc-plugin/releases) for your specific validator version
    - **NOTE**: Be sure to use the branch matching the major & minor versions of your RPC node. This includes using Solana Foundation or Jito validator
-2. Copy the [config json file](./server/example-config.json)
-3. Add arg to solana validator
+2. Copy and edit the [config json file](./server/example-config.json) to suit your validator
+3. Add startup arg to solana validator
     - Example: `--geyser-plugin-config geyser.json`
 4. Restart validator
 5. Check logs for `Starting GeyserPluginService from config files` or `geyser_grpc_plugin_server::server`
