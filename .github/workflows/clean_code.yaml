@@ -19,7 +19,7 @@ jobs:
         run: cargo install cargo-sort --locked
 
       - name: Cargo sort
-        run: cargo +stable sort --workspace --check
+        run: cargo sort --workspace --check
 
       - name: Clippy Check
-        run: cargo +nightly clippy --all-features --all-targets --tests
+        run: cargo clippy --all-features --all-targets --tests
