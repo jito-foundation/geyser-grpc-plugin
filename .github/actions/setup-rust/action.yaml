@@ -49,17 +49,3 @@ runs:
         cargo clippy --version || true;
         cargo fmt --version || true;
       shell: bash
-
-    - uses: actions-rs/toolchain@v1
-      with:
-        toolchain: nightly
-        override: true
-        components: clippy, rustfmt
-
-    - name: Check rust version after
-      run: |
-        rustc --version;
-        cargo --version;
-        cargo clippy --version;
-        cargo fmt --version;
-      shell: bash

@@ -42,7 +42,7 @@ RUN --mount=type=cache,mode=0777,target=/geyser-grpc-plugin/target \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/registry \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/git \
     if [ -z "$features" ] ; then \
-      ./cargo build --release && cp target/release/libgeyser* ./container-output; \
+      cargo build --release && cp target/release/libgeyser* ./container-output; \
     else \
-      ./cargo build --release --features "$features" && cp target/release/libgeyser* ./container-output; \
+      cargo build --release --features "$features" && cp target/release/libgeyser* ./container-output; \
     fi
