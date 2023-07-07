@@ -23,12 +23,12 @@ use uuid::Uuid;
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]
 struct Args {
-    #[clap(long, env, default_value = "mainnet.rpc.jito.wtf")]
+    #[clap(long, env, default_value = "https://mainnet.rpc.jito.wtf")]
     url: String,
 
     /// access token uuid
-    #[clap(long, env, required = false)]
-    access_token: Uuid,
+    #[clap(long, env)]
+    access_token: Option<Uuid>,
 
     #[clap(subcommand)]
     command: Commands,
@@ -72,19 +72,20 @@ async fn main() {
     let args: Args = Args::parse();
     println!("args: {args:?}");
 
-    // The geyser client must use https and ensure their OS and client is configured for TLS
-    let url = format!("https://{}", args.url);
-    let channel = Endpoint::from_str(&url)
-        .expect("valid url")
-        .tls_config(ClientTlsConfig::new())
-        .expect("create tls config")
-        .connect()
-        .await
-        .expect("connects");
+    let mut endpoint = Endpoint::from_str(&args.url).unwrap();
+    if args.url.starts_with("https://") {
+        endpoint = endpoint
+            .tls_config(ClientTlsConfig::new())
+            .expect("create tls config");
+    }
 
-    // The access token is provided as "access-token": "{uuid_v4}" in the request header
+    let channel = endpoint.connect().await.expect("connects");
+
     let interceptor = GrpcInterceptor {
-        access_token: args.access_token.to_string(),
+        access_token: args
+            .access_token
+            .map(|uuid| uuid.to_string())
+            .unwrap_or_default(),
     };
     let mut client = GeyserClient::with_interceptor(channel, interceptor);
 
