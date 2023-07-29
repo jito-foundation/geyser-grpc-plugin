@@ -13,16 +13,9 @@ use solana_transaction_status::{
     InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
 };
 
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_account_decoder as solana_account_decoder;
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_sdk as solana_sdk;
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_transaction_status as solana_transaction_status;
-
 pub mod convert;
 
-// NOTE: Jito Labs added
+// NOTE: Jito added
 pub mod solana {
     pub mod geyser {
         tonic::include_proto!("solana.geyser");
@@ -30,6 +23,9 @@ pub mod solana {
     pub mod storage {
         pub mod confirmed_block {
             tonic::include_proto!("solana.storage.confirmed_block");
+        }
+        pub mod tx_by_addr {
+            tonic::include_proto!("solana.storage.transaction_by_addr");
         }
     }
 }

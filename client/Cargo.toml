@@ -1,29 +1,23 @@
 [package]
 name = "geyser-grpc-plugin-client"
-version = "0.1.0"
-authors = ["Jito Foundation <team@jito.network>"]
-license = "Apache-2.0"
-edition = "2021"
+version =  { workspace = true }
+authors =  { workspace = true }
+license =  { workspace = true }
+edition =  { workspace = true }
 
 [dependencies]
-jito-geyser-protos = { path = "../proto" }
-jito-solana-sdk = { git = "https://github.com/jito-foundation/jito-solana.git", tag = "v1.14.17-jito", package = "solana-sdk", optional = true }
-log = "0.4"
-lru = "0.8" # keep old version due to MSRV of 1.60
-prost = "0.11.9"
-prost-types = "0.11.9"
-rand = "0.8"
-serde = "1.0.160"
-serde_json = "1.0.96"
-
-solana-sdk = "~1.14"
-
-thiserror = "1.0.40"
-tokio = { version = "1", features = ["rt-multi-thread"] }
-tonic = { version = "0.9.2", features = ["tls"] }
+jito-geyser-protos = { workspace = true }
+log = { workspace = true }
+lru = { workspace = true }
+prost = { workspace = true }
+prost-types = { workspace = true }
+rand = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tonic = { workspace = true, features = ["tls"] }
 
 [build-dependencies]
-tonic-build = "0.9.2"
-
-[features]
-jito-solana = ["jito-solana-sdk"]
+tonic-build = { workspace = true }

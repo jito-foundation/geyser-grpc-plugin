@@ -1,3 +1,4 @@
 [toolchain]
-channel = "1.60.0"
+# https://github.com/solana-labs/solana/blob/v1.16.5/rust-toolchain.toml
+channel = "1.69.0"
 components = [ "rustfmt", "rustc-dev", "clippy", "cargo" ]
