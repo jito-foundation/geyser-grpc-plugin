@@ -34,15 +34,9 @@ RUN mkdir -p container-output
 ARG ci_commit
 ENV CI_COMMIT=$ci_commit
 
-ARG features
-
 # Uses docker buildkit to cache the image.
 # /usr/local/cargo/git needed for crossbeam patch
 RUN --mount=type=cache,mode=0777,target=/geyser-grpc-plugin/target \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/registry \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/git \
-    if [ -z "$features" ] ; then \
-      cargo build --release && cp target/release/libgeyser* ./container-output; \
-    else \
-      cargo build --release --features "$features" && cp target/release/libgeyser* ./container-output; \
-    fi
+    cargo build --release && cp target/release/libgeyser* ./container-output

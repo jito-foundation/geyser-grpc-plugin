@@ -3,9 +3,6 @@
 # Useful for running on machines that might not have cargo installed but can run docker/podman (Flatcar Linux).
 set -eux
 
-# Comma delimited list of feature flags passed to the geyser-grpc-plugin/server crate e.g. jito-solana.
-FEATURES=${1:-""}
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 
 GIT_SHA="$(git describe --always --dirty)"
@@ -34,8 +31,7 @@ ${CONTAINER_CMD} build \
   --build-arg ci_commit="$GIT_SHA" \
   -t geyser-grpc-plugin \
   -f Dockerfile . \
-  --progress=plain \
-  --build-arg features="$FEATURES"
+  --progress=plain
 
 # Creates a temporary container, copies geyser-grpc-plugin built inside container there and
 # removes the temporary container.
