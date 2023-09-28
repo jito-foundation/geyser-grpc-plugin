@@ -13,6 +13,20 @@ use solana_transaction_status::{
     InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
 };
 
+#[cfg(not(feature = "jito-solana"))]
+extern crate solana_account_decoder;
+#[cfg(not(feature = "jito-solana"))]
+extern crate solana_sdk;
+#[cfg(not(feature = "jito-solana"))]
+extern crate solana_transaction_status;
+
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_account_decoder as solana_account_decoder;
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_sdk as solana_sdk;
+#[cfg(feature = "jito-solana")]
+extern crate jito_solana_transaction_status as solana_transaction_status;
+
 pub mod convert;
 
 // NOTE: Jito added

@@ -12,7 +12,13 @@ crate-type = ["cdylib", "rlib"]
 bs58 = { workspace = true }
 crossbeam-channel = { workspace = true }
 futures-util = { workspace = true }
-jito-geyser-protos = { workspace = true }
+jito-geyser-protos = { workspace = true  }
+jito-solana-geyser-plugin-interface = { workspace = true, optional = true }
+jito-solana-logger = { workspace = true, optional = true }
+jito-solana-metrics = { workspace = true, optional = true }
+jito-solana-program = { workspace = true, optional = true }
+jito-solana-sdk = { workspace = true, optional = true }
+jito-solana-vote-program = { workspace = true, optional = true }
 log = { workspace = true }
 once_cell = { workspace = true }
 prost = { workspace = true }
@@ -38,3 +44,6 @@ tonic-build =  { workspace = true }
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]
+
+[features]
+jito-solana = ["jito-solana-geyser-plugin-interface", "jito-solana-logger", "jito-solana-metrics", "jito-solana-program", "jito-solana-sdk", "jito-solana-vote-program"]

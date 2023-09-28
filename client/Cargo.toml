@@ -7,6 +7,7 @@ edition =  { workspace = true }
 
 [dependencies]
 jito-geyser-protos = { workspace = true }
+jito-solana-sdk = { workspace = true, optional = true }
 log = { workspace = true }
 lru = { workspace = true }
 prost = { workspace = true }
@@ -21,3 +22,6 @@ tonic = { workspace = true, features = ["tls"] }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[features]
+jito-solana = ["jito-solana-sdk"]

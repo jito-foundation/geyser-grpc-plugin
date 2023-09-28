@@ -8,6 +8,9 @@ description = "Jito's Solana geyser protobufs and helper libraries"
 
 [dependencies]
 bincode = { workspace = true }
+jito-solana-account-decoder = { workspace = true, optional = true }
+jito-solana-sdk = { workspace = true, optional = true }
+jito-solana-transaction-status = { workspace = true, optional = true }
 prost =  { workspace = true }
 prost-types =  { workspace = true }
 serde =  { workspace = true }
@@ -18,3 +21,6 @@ tonic =  { workspace = true }
 
 [build-dependencies]
 tonic-build =  { workspace = true }
+
+[features]
+jito-solana = ["jito-solana-account-decoder", "jito-solana-sdk", "jito-solana-transaction-status"]
