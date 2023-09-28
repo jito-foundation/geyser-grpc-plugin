@@ -908,6 +908,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 }
                 TransactionError::ResanitizationNeeded => {
                     tx_by_addr::TransactionErrorType::ResanitizationNeeded
+                },
+                TransactionError::UnbalancedTransaction => {
+                    tx_by_addr::TransactionErrorType::UnbalancedTransaction
                 }
             } as i32,
             instruction_error: match transaction_error {
