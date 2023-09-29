@@ -6,7 +6,6 @@ members = [
     "server"
 ]
 
-
 [workspace.package]
 version = "0.1.0"
 authors = ["Jito Foundation Maintainers <team@jito.netwokr>"]
