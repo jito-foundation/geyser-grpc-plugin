@@ -4,13 +4,6 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_account_decoder as solana_account_decoder;
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_sdk as solana_sdk;
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_transaction_status as solana_transaction_status;
-
 use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
 use solana_sdk::{
     hash::Hash,
@@ -26,7 +19,7 @@ use solana_sdk::{
     transaction_context::TransactionReturnData,
 };
 use solana_transaction_status::{
-    ConfirmedBlock, InnerInstructions, Reward, RewardType, TransactionByAddrInfo,
+    ConfirmedBlock, InnerInstruction, InnerInstructions, Reward, RewardType, TransactionByAddrInfo,
     TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
@@ -242,8 +235,9 @@ impl From<confirmed_block::Transaction> for VersionedTransaction {
             signatures: value
                 .signatures
                 .into_iter()
-                .map(|x| Signature::new(&x))
-                .collect(),
+                .map(Signature::try_from)
+                .collect::<Result<_, _>>()
+                .unwrap(),
             message: value.message.expect("message is required").into(),
         }
     }
@@ -304,7 +298,7 @@ impl From<confirmed_block::Message> for VersionedMessage {
         let account_keys = value
             .account_keys
             .into_iter()
-            .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
+            .map(|key| Pubkey::try_from(key).unwrap())
             .collect();
         let recent_blockhash = Hash::new(&value.recent_blockhash);
         let instructions = value.instructions.into_iter().map(|ix| ix.into()).collect();
@@ -498,12 +492,20 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
         let loaded_addresses = LoadedAddresses {
             writable: loaded_writable_addresses
                 .into_iter()
-                .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
-                .collect(),
+                .map(Pubkey::try_from)
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    let err = format!("Invalid writable address: {err:?}");
+                    Self::Error::new(bincode::ErrorKind::Custom(err))
+                })?,
             readonly: loaded_readonly_addresses
                 .into_iter()
-                .map(|key| Pubkey::try_from(key).expect("Failed to parse Pubkey"))
-                .collect(),
+                .map(Pubkey::try_from)
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    let err = format!("Invalid readonly address: {err:?}");
+                    Self::Error::new(bincode::ErrorKind::Custom(err))
+                })?,
         };
         let return_data = if return_data_none {
             None
@@ -604,7 +606,7 @@ impl From<MessageAddressTableLookup> for confirmed_block::MessageAddressTableLoo
 impl From<confirmed_block::MessageAddressTableLookup> for MessageAddressTableLookup {
     fn from(value: confirmed_block::MessageAddressTableLookup) -> Self {
         Self {
-            account_key: Pubkey::try_from(value.account_key).expect("Failed to parse Pubkey"),
+            account_key: Pubkey::try_from(value.account_key).unwrap(),
             writable_indexes: value.writable_indexes,
             readonly_indexes: value.readonly_indexes,
         }
@@ -623,7 +625,7 @@ impl From<TransactionReturnData> for confirmed_block::ReturnData {
 impl From<confirmed_block::ReturnData> for TransactionReturnData {
     fn from(value: confirmed_block::ReturnData) -> Self {
         Self {
-            program_id: Pubkey::try_from(value.program_id).expect("Failed to parse Pubkey"),
+            program_id: Pubkey::try_from(value.program_id).unwrap(),
             data: value.data,
         }
     }
@@ -645,6 +647,30 @@ impl From<confirmed_block::CompiledInstruction> for CompiledInstruction {
             program_id_index: value.program_id_index as u8,
             accounts: value.accounts,
             data: value.data,
+        }
+    }
+}
+
+impl From<InnerInstruction> for confirmed_block::InnerInstruction {
+    fn from(value: InnerInstruction) -> Self {
+        Self {
+            program_id_index: value.instruction.program_id_index as u32,
+            accounts: value.instruction.accounts,
+            data: value.instruction.data,
+            stack_height: value.stack_height,
+        }
+    }
+}
+
+impl From<confirmed_block::InnerInstruction> for InnerInstruction {
+    fn from(value: confirmed_block::InnerInstruction) -> Self {
+        Self {
+            instruction: CompiledInstruction {
+                program_id_index: value.program_id_index as u8,
+                accounts: value.accounts,
+                data: value.data,
+            },
+            stack_height: value.stack_height,
         }
     }
 }
@@ -712,8 +738,10 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                     47 => InstructionError::ArithmeticOverflow,
                     48 => InstructionError::UnsupportedSysvar,
                     49 => InstructionError::IllegalOwner,
-                    50 => InstructionError::MaxAccountsDataSizeExceeded,
+                    50 => InstructionError::MaxAccountsDataAllocationsExceeded,
                     51 => InstructionError::MaxAccountsExceeded,
+                    52 => InstructionError::MaxInstructionTraceLengthExceeded,
+                    53 => InstructionError::BuiltinProgramsMustConsumeComputeUnits,
                     _ => return Err("Invalid InstructionError"),
                 };
 
@@ -733,6 +761,12 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                 }
                 31 => {
                     return Ok(TransactionError::InsufficientFundsForRent {
+                        account_index: transaction_details.index as u8,
+                    });
+                }
+
+                35 => {
+                    return Ok(TransactionError::ProgramExecutionTemporarilyRestricted {
                         account_index: transaction_details.index as u8,
                     });
                 }
@@ -770,8 +804,10 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             27 => TransactionError::InvalidRentPayingAccount,
             28 => TransactionError::WouldExceedMaxVoteCostLimit,
             29 => TransactionError::WouldExceedAccountDataTotalLimit,
-            // 32 => TransactionError::BundleNotContinuous,
-            // 33 => TransactionError::SkippedExecution,
+            32 => TransactionError::MaxLoadedAccountsDataSizeExceeded,
+            33 => TransactionError::InvalidLoadedAccountsDataSizeLimit,
+            34 => TransactionError::ResanitizationNeeded,
+            36 => TransactionError::UnbalancedTransaction,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -875,13 +911,20 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 TransactionError::InsufficientFundsForRent { .. } => {
                     tx_by_addr::TransactionErrorType::InsufficientFundsForRent
                 }
-                #[cfg(feature = "jito-solana")]
-                TransactionError::BundleNotContinuous => {
-                    tx_by_addr::TransactionErrorType::BundleNotContinuous
+                TransactionError::MaxLoadedAccountsDataSizeExceeded => {
+                    tx_by_addr::TransactionErrorType::MaxLoadedAccountsDataSizeExceeded
                 }
-                #[cfg(feature = "jito-solana")]
-                TransactionError::SkippedExecution => {
-                    tx_by_addr::TransactionErrorType::SkippedExecution
+                TransactionError::InvalidLoadedAccountsDataSizeLimit => {
+                    tx_by_addr::TransactionErrorType::InvalidLoadedAccountsDataSizeLimit
+                }
+                TransactionError::ResanitizationNeeded => {
+                    tx_by_addr::TransactionErrorType::ResanitizationNeeded
+                }
+                TransactionError::ProgramExecutionTemporarilyRestricted { .. } => {
+                    tx_by_addr::TransactionErrorType::ProgramExecutionTemporarilyRestricted
+                }
+                TransactionError::UnbalancedTransaction => {
+                    tx_by_addr::TransactionErrorType::UnbalancedTransaction
                 }
             } as i32,
             instruction_error: match transaction_error {
@@ -1037,11 +1080,17 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::IllegalOwner => {
                                 tx_by_addr::InstructionErrorType::IllegalOwner
                             }
-                            InstructionError::MaxAccountsDataSizeExceeded => {
-                                tx_by_addr::InstructionErrorType::MaxAccountsDataSizeExceeded
+                            InstructionError::MaxAccountsDataAllocationsExceeded => {
+                                tx_by_addr::InstructionErrorType::MaxAccountsDataAllocationsExceeded
                             }
                             InstructionError::MaxAccountsExceeded => {
                                 tx_by_addr::InstructionErrorType::MaxAccountsExceeded
+                            }
+                            InstructionError::MaxInstructionTraceLengthExceeded => {
+                                tx_by_addr::InstructionErrorType::MaxInstructionTraceLengthExceeded
+                            }
+                            InstructionError::BuiltinProgramsMustConsumeComputeUnits => {
+                                tx_by_addr::InstructionErrorType::BuiltinProgramsMustConsumeComputeUnits
                             }
                         } as i32,
                         custom: match instruction_error {
@@ -1065,6 +1114,12 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                         index: account_index as u32,
                     })
                 }
+                TransactionError::ProgramExecutionTemporarilyRestricted { account_index } => {
+                    Some(tx_by_addr::TransactionDetails {
+                        index: account_index as u32,
+                    })
+                }
+
                 _ => None,
             },
         }
@@ -1103,7 +1158,8 @@ impl TryFrom<tx_by_addr::TransactionByAddrInfo> for TransactionByAddrInfo {
             .transpose()?;
 
         Ok(Self {
-            signature: Signature::new(&transaction_by_addr.signature),
+            signature: Signature::try_from(transaction_by_addr.signature)
+                .map_err(|_| "Invalid Signature")?,
             err,
             index: transaction_by_addr.index,
             memo: transaction_by_addr
@@ -1130,7 +1186,7 @@ impl TryFrom<tx_by_addr::TransactionByAddr> for Vec<TransactionByAddrInfo> {
 
 #[cfg(test)]
 mod test {
-    use solana_sdk::bs58;
+    use enum_iterator::all;
 
     use super::*;
 
@@ -1166,7 +1222,11 @@ mod test {
     #[test]
     fn test_transaction_by_addr_encode() {
         let info = TransactionByAddrInfo {
-            signature: Signature::new(&bs58::decode("Nfo6rgemG1KLbk1xuNwfrQTsdxaGfLuWURHNRy9LYnDrubG7LFQZaA5obPNas9LQ6DdorJqxh2LxA3PsnWdkSrL").into_vec().unwrap()),
+            signature: bs58::decode("Nfo6rgemG1KLbk1xuNwfrQTsdxaGfLuWURHNRy9LYnDrubG7LFQZaA5obPNas9LQ6DdorJqxh2LxA3PsnWdkSrL")
+                .into_vec()
+                .map(Signature::try_from)
+                .unwrap()
+                .unwrap(),
             err: None,
             index: 5,
             memo: Some("string".to_string()),
@@ -1752,24 +1812,25 @@ mod test {
             transaction_error,
             tx_by_addr_transaction_error.try_into().unwrap()
         );
+
+        let transaction_error = TransactionError::UnbalancedTransaction;
+        let tx_by_addr_transaction_error: tx_by_addr::TransactionError =
+            transaction_error.clone().into();
+        assert_eq!(
+            transaction_error,
+            tx_by_addr_transaction_error.try_into().unwrap()
+        );
     }
 
     #[test]
     fn test_error_enums() {
         let ix_index = 1;
         let custom_error = 42;
-        let transaction_error_types =
-            (0..32) // ignore BundleNotContinuous and SkippedExecution
-                .filter_map(tx_by_addr::TransactionErrorType::from_i32)
-                .collect::<Vec<tx_by_addr::TransactionErrorType>>();
-        let instruction_error_types = (0..256)
-            .filter_map(tx_by_addr::InstructionErrorType::from_i32)
-            .collect::<Vec<tx_by_addr::InstructionErrorType>>();
-
-        for error in transaction_error_types {
+        for error in all::<tx_by_addr::TransactionErrorType>() {
             match error {
                 tx_by_addr::TransactionErrorType::DuplicateInstruction
-                | tx_by_addr::TransactionErrorType::InsufficientFundsForRent => {
+                | tx_by_addr::TransactionErrorType::InsufficientFundsForRent
+                | tx_by_addr::TransactionErrorType::ProgramExecutionTemporarilyRestricted => {
                     let tx_by_addr_error = tx_by_addr::TransactionError {
                         transaction_error: error as i32,
                         instruction_error: None,
@@ -1780,11 +1841,11 @@ mod test {
                     let transaction_error: TransactionError = tx_by_addr_error
                         .clone()
                         .try_into()
-                        .unwrap_or_else(|_| panic!("{:?} conversion implemented?", error));
+                        .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());
                 }
                 tx_by_addr::TransactionErrorType::InstructionError => {
-                    for ix_error in instruction_error_types.clone() {
+                    for ix_error in all::<tx_by_addr::InstructionErrorType>() {
                         if ix_error != tx_by_addr::InstructionErrorType::Custom {
                             let tx_by_addr_error = tx_by_addr::TransactionError {
                                 transaction_error: error as i32,
@@ -1795,10 +1856,10 @@ mod test {
                                 }),
                                 transaction_details: None,
                             };
-                            let transaction_error: TransactionError =
-                                tx_by_addr_error.clone().try_into().unwrap_or_else(|_| {
-                                    panic!("{:?} conversion implemented?", ix_error)
-                                });
+                            let transaction_error: TransactionError = tx_by_addr_error
+                                .clone()
+                                .try_into()
+                                .unwrap_or_else(|_| panic!("{ix_error:?} conversion implemented?"));
                             assert_eq!(tx_by_addr_error, transaction_error.into());
                         } else {
                             let tx_by_addr_error = tx_by_addr::TransactionError {
@@ -1827,7 +1888,7 @@ mod test {
                     let transaction_error: TransactionError = tx_by_addr_error
                         .clone()
                         .try_into()
-                        .unwrap_or_else(|_| panic!("{:?} conversion implemented?", error));
+                        .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());
                 }
             }

@@ -128,7 +128,7 @@ pub struct SlotUpdate {
 
 impl From<geyser::SlotUpdate> for SlotUpdate {
     fn from(proto: geyser::SlotUpdate) -> Self {
-        let status = geyser::SlotUpdateStatus::from_i32(proto.status).unwrap();
+        let status = geyser::SlotUpdateStatus::try_from(proto.status).unwrap();
         Self {
             parent_slot: proto.parent_slot,
             slot: proto.slot,

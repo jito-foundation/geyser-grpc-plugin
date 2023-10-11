@@ -113,6 +113,8 @@ message BlockUpdate {
   repeated storage.ConfirmedBlock.Reward rewards = 3;
   google.protobuf.Timestamp block_time = 4;
   optional uint64 block_height = 5;
+  optional uint64 executed_transaction_count = 6;
+  optional uint64 entry_count = 7;
 }
 
 message TimestampedBlockUpdate {
