@@ -104,7 +104,7 @@ async fn main() {
                             "slot: {} parent: {:?} status: {:?}",
                             slot_update.slot,
                             slot_update.parent_slot,
-                            SlotUpdateStatus::from_i32(slot_update.status)
+                            SlotUpdateStatus::try_from(slot_update.status).unwrap()
                         );
                     }
                     Err(e) => {

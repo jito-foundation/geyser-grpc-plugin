@@ -151,7 +151,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn update_account(
-        &mut self,
+        &self,
         account: ReplicaAccountInfoVersions,
         slot: u64,
         is_startup: bool,
@@ -193,6 +193,22 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     }),
                 }
             }
+            ReplicaAccountInfoVersions::V0_0_3(account) => TimestampedAccountUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                account_update: Some(AccountUpdate {
+                    slot,
+                    pubkey: account.pubkey.to_vec(),
+                    lamports: account.lamports,
+                    owner: account.owner.to_vec(),
+                    is_executable: account.executable,
+                    rent_epoch: account.rent_epoch,
+                    data: account.data.to_vec(),
+                    seq: account.write_version,
+                    is_startup,
+                    tx_signature: account.txn.map(|tx| tx.signature().to_string()),
+                    replica_version: 2,
+                }),
+            },
         };
 
         let pubkey = &account_update.account_update.as_ref().unwrap().pubkey;
@@ -238,12 +254,12 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         }
     }
 
-    fn notify_end_of_startup(&mut self) -> PluginResult<()> {
+    fn notify_end_of_startup(&self) -> PluginResult<()> {
         Ok(())
     }
 
     fn update_slot_status(
-        &mut self,
+        &self,
         slot: u64,
         parent_slot: Option<u64>,
         status: SlotStatus,
@@ -280,7 +296,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn notify_transaction(
-        &mut self,
+        &self,
         transaction: ReplicaTransactionInfoVersions,
         slot: u64,
     ) -> PluginResult<()> {
@@ -329,7 +345,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         }
     }
 
-    fn notify_block_metadata(&mut self, block_info: ReplicaBlockInfoVersions) -> PluginResult<()> {
+    fn notify_block_metadata(&self, block_info: ReplicaBlockInfoVersions) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
 
         let block = match block_info {
@@ -344,6 +360,38 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                         nanos: 0,
                     }),
                     block_height: block.block_height,
+                    executed_transaction_count: None,
+                    entry_count: None,
+                }),
+            },
+            ReplicaBlockInfoVersions::V0_0_2(block) => TimestampedBlockUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                block_update: Some(BlockUpdate {
+                    slot: block.slot,
+                    blockhash: block.blockhash.to_string(),
+                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
+                    block_time: block.block_time.map(|t| prost_types::Timestamp {
+                        seconds: t,
+                        nanos: 0,
+                    }),
+                    block_height: block.block_height,
+                    executed_transaction_count: Some(block.executed_transaction_count),
+                    entry_count: None,
+                }),
+            },
+            ReplicaBlockInfoVersions::V0_0_3(block) => TimestampedBlockUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                block_update: Some(BlockUpdate {
+                    slot: block.slot,
+                    blockhash: block.blockhash.to_string(),
+                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
+                    block_time: block.block_time.map(|t| prost_types::Timestamp {
+                        seconds: t,
+                        nanos: 0,
+                    }),
+                    block_height: block.block_height,
+                    executed_transaction_count: Some(block.executed_transaction_count),
+                    entry_count: Some(block.entry_count),
                 }),
             },
         };
