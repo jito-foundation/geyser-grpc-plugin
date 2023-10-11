@@ -1683,14 +1683,12 @@ name = "jito-geyser-cli"
 version = "1.17.1"
 dependencies = [
  "clap",
- "clap_lex",
  "futures-util",
  "geyser-grpc-plugin-client",
  "jito-geyser-protos",
  "prost-types",
  "solana-sdk",
  "tokio",
- "toml_datetime",
  "tonic",
  "uuid",
 ]
