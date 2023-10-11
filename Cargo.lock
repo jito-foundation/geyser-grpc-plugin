@@ -1700,6 +1700,8 @@ name = "jito-geyser-protos"
 version = "1.17.1"
 dependencies = [
  "bincode",
+ "bs58 0.5.0",
+ "enum-iterator",
  "prost",
  "prost-types",
  "serde",

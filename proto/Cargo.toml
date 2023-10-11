@@ -18,3 +18,7 @@ tonic = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+enum-iterator = { workspace = true }
+bs58 = { workspace = true }
