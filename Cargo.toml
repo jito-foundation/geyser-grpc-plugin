@@ -43,7 +43,7 @@ solana-sdk = "1.16.17"
 solana-transaction-status = "1.16.17"
 solana-vote-program = "1.16.17"
 thiserror = "1.0.40"
-tokio = { version = "~1.14.1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 tokio-stream = "0.1"
 toml_datetime = "=0.6.0" # manual dep override for clap.
 tonic = "0.9.2"
