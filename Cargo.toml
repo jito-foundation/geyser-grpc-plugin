@@ -44,7 +44,7 @@ solana-sdk = "1.17.1"
 solana-transaction-status = "1.17.1"
 solana-vote-program = "1.17.1"
 thiserror = "1.0.40"
-tokio = { version = "1.29.1", features = ["rt-multi-thread"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 tokio-stream = "0.1"
 tonic = { version = "0.10.2", features = ["tls"] }
 tonic-build = "0.10.2"
