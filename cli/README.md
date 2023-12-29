@@ -3,7 +3,7 @@
 Allows one to exercise functionality of this geyser implementation
 
 ## Access Tokens
-If you'd like to access Jito's load-balanced RPC cluster at https://mainnet.rpc.jito.wtf, email support@jito.wtf or create a support ticket in the discord. Please be kind and don't abuse.
+If you'd like to access Jito's load-balanced RPC cluster at https://mainnet.rpc.jito.wtf, fill out [this](https://web.miniextensions.com/WV3gZjFwqNqITsMufIEp) form.
 
 ## Building
 ```bash
