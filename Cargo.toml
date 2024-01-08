@@ -30,6 +30,7 @@ lru = "0.8" # keep old version due to MSRV of 1.60
 once_cell = "1.17.1"
 prost = "0.11.9"
 prost-types = "0.11.9"
+protobuf-src = "1.1.0"
 rand = "0.8"
 serde = "1.0.160"
 serde_derive = "1.0.160"

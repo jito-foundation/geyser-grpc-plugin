@@ -17,4 +17,5 @@ solana-transaction-status =  { workspace = true }
 tonic =  { workspace = true }
 
 [build-dependencies]
-tonic-build =  { workspace = true }
+protobuf-src = { workspace = true }
+tonic-build = { workspace = true }
