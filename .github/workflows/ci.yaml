@@ -1,4 +1,4 @@
-name: Rust Clippy CI
+name: Geyser CI
 
 on:
   push:
