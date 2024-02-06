@@ -73,7 +73,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         "geyser-grpc-plugin"
     }
 
-    fn on_load(&mut self, config_path: &str) -> PluginResult<()> {
+    fn on_load(&mut self, config_path: &str, _is_reload: bool) -> PluginResult<()> {
         solana_logger::setup_with_default("info");
         info!(
             "Loading plugin {:?} from config_path {:?}",
@@ -404,8 +404,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             Err(TrySendError::Disconnected(_)) => {
                 error!("block update send disconnected");
                 Err(GeyserPluginError::Custom(
-                    Box::try_from("block_update_sender channel disconnected, exiting".to_string())
-                        .unwrap(),
+                    "block_update_sender channel disconnected, exiting".into(),
                 ))
             }
         }

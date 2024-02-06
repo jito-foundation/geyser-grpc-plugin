@@ -1,0 +1,49 @@
+name: Rust Clippy CI
+
+on:
+  push:
+    branches: [ master ]
+    tags:
+      - 'v*.*.*'
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: rustfmt, clippy
+      - name: Install cargo-sort from crates.io
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-sort
+          version: "1.0.9"
+      - name: Cargo sort
+        run: cargo sort --workspace --check
+      - name: run clippy
+        run: cargo clippy --all-features -- -D clippy::all -D clippy::nursery -D clippy::integer_division -D clippy::arithmetic_side_effects -D clippy::style -D clippy::perf
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo build --release
+  #      - name: Create Release with artifact
+  #        uses: softprops/action-gh-release@v1
+  #        if: startsWith(github.ref, 'refs/tags/')
+  #        with:
+  #          files: ./libgeyser_grpc_plugin_server.so
+
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - run: cargo test --all-features --all-targets
