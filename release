@@ -1,2 +1,13 @@
 #!/usr/bin/env sh
-cargo workspaces version --all --exact --no-individual-tags
+
+# Get the current branch name
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+branch_pattern="^v[0-9]+\.[0-9]+$"
+
+if [[ $current_branch =~ $branch_pattern ]] || [ "$current_branch" = "master" ]; then
+    # If the current branch is a version branch or master, run the cargo workspaces version command
+    cargo workspaces version --all --exact --no-individual-tags --allow-branch $current_branch
+else
+    echo "Current branch does not match the allowed patterns."
+fi
