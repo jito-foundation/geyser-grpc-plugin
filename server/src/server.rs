@@ -689,9 +689,8 @@ impl GeyserService {
             });
 
         Ok(failed_account_update_sends
-            .into_iter()
-            .chain(failed_partial_account_update_sends.into_iter())
-            .chain(failed_program_update_sends.into_iter())
+            .chain(failed_partial_account_update_sends)
+            .chain(failed_program_update_sends)
             .collect())
     }
 
@@ -751,9 +750,9 @@ impl Geyser for GeyserService {
         &self,
         _request: Request<EmptyRequest>,
     ) -> Result<Response<GetHeartbeatIntervalResponse>, Status> {
-        return Ok(Response::new(GetHeartbeatIntervalResponse {
+        Ok(Response::new(GetHeartbeatIntervalResponse {
             heartbeat_interval_ms: self.service_config.heartbeat_interval_ms,
-        }));
+        }))
     }
 
     type SubscribeAccountUpdatesStream = SubscriptionStream<Uuid, TimestampedAccountUpdate>;
