@@ -95,6 +95,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 msg: format!("Error deserializing PluginConfig: {err:?}"),
             })?;
 
+        info!("loaded geyser config: {:?}", config);
+
         let addr =
             config
                 .bind_address
