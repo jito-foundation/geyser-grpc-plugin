@@ -495,7 +495,7 @@ impl Interceptor for AccessTokenChecker {
         if let Some(access_token) = &self.access_token {
             match req.metadata().get("access-token") {
                 Some(t) if access_token == t => Ok(req),
-                _ => Err(Status::unauthenticated("No valid auth token")),
+                _ => Err(Status::unauthenticated("Access token is incorrect")),
             }
         } else {
             Ok(req)
