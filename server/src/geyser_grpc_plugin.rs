@@ -1,5 +1,7 @@
 //! Implements the geyser plugin interface.
 
+use std::fs;
+use std::sync::atomic::AtomicBool;
 use std::{
     fs::File,
     io::Read,
@@ -9,7 +11,6 @@ use std::{
     },
     time::SystemTime,
 };
-use std::sync::atomic::AtomicBool;
 
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
@@ -29,7 +30,10 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use tokio::{runtime::Runtime, sync::oneshot};
-use tonic::transport::Server;
+use tonic::service::interceptor::InterceptedService;
+use tonic::service::Interceptor;
+use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::{Request, Status};
 
 use crate::server::{GeyserService, GeyserServiceConfig};
 
@@ -47,7 +51,7 @@ pub struct PluginData {
     highest_write_slot: Arc<AtomicU64>,
 
     is_startup_completed: AtomicBool,
-    ignore_startup_updates: bool
+    ignore_startup_updates: bool,
 }
 
 #[derive(Default)]
@@ -70,7 +74,7 @@ pub struct PluginConfig {
     pub slot_update_buffer_size: usize,
     pub block_update_buffer_size: usize,
     pub transaction_update_buffer_size: usize,
-    pub skip_startup_stream: Option<bool>
+    pub skip_startup_stream: Option<bool>,
 }
 
 impl GeyserPlugin for GeyserGrpcPlugin {
@@ -114,7 +118,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             bounded(config.transaction_update_buffer_size);
 
         let svc = GeyserService::new(
-            config.geyser_service_config,
+            config.geyser_service_config.clone(),
             account_update_rx,
             slot_update_rx,
             block_update_receiver,
@@ -125,8 +129,19 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
         let runtime = Runtime::new().unwrap();
         let (server_exit_tx, server_exit_rx) = oneshot::channel();
+        let mut server_builder = Server::builder();
+        let tls_config = config.geyser_service_config.tls_config.clone();
+        let x_token = config.geyser_service_config.x_token.clone();
+        if let Some(tls_config) = tls_config {
+            let cert = fs::read(&tls_config.cert_path)?;
+            let key = fs::read(&tls_config.key_path)?;
+            server_builder = server_builder
+                .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
+                .map_err(|e| GeyserPluginError::Custom(e.into()))?;
+        }
+        let svc = InterceptedService::new(svc, XTokenChecker::new(x_token));
         runtime.spawn(
-            Server::builder()
+            server_builder
                 .add_service(svc)
                 .serve_with_shutdown(addr, async move {
                     let _ = server_exit_rx.await;
@@ -143,7 +158,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             highest_write_slot,
             is_startup_completed: AtomicBool::new(false),
             // don't skip startup to keep backwards compatability
-            ignore_startup_updates: config.skip_startup_stream.unwrap_or(false)
+            ignore_startup_updates: config.skip_startup_stream.unwrap_or(false),
         });
         info!("plugin data initialized");
 
@@ -161,7 +176,11 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn notify_end_of_startup(&self) -> PluginResult<()> {
-        self.data.as_ref().unwrap().is_startup_completed.store(true, Ordering::Relaxed);
+        self.data
+            .as_ref()
+            .unwrap()
+            .is_startup_completed
+            .store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -458,4 +477,28 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
     let plugin = GeyserGrpcPlugin::default();
     let plugin: Box<dyn GeyserPlugin> = Box::new(plugin);
     Box::into_raw(plugin)
+}
+
+#[derive(Clone)]
+struct XTokenChecker {
+    x_token: Option<String>,
+}
+
+impl XTokenChecker {
+    fn new(x_token: Option<String>) -> Self {
+        Self { x_token }
+    }
+}
+
+impl Interceptor for XTokenChecker {
+    fn call(&mut self, req: Request<()>) -> Result<Request<()>, Status> {
+        if let Some(x_token) = &self.x_token {
+            match req.metadata().get("x-token") {
+                Some(t) if x_token == t => Ok(req),
+                _ => Err(Status::unauthenticated("No valid auth token")),
+            }
+        } else {
+            Ok(req)
+        }
+    }
 }
