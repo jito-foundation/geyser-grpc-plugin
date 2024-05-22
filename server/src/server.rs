@@ -297,7 +297,7 @@ pub struct GeyserServiceConfig {
     subscriber_buffer_size: usize,
 
     pub tls_config: Option<ServerTlsConfig>,
-    pub x_token: Option<String>,
+    pub access_token: Option<String>,
 }
 
 pub struct GeyserService {

@@ -131,7 +131,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         let (server_exit_tx, server_exit_rx) = oneshot::channel();
         let mut server_builder = Server::builder();
         let tls_config = config.geyser_service_config.tls_config.clone();
-        let x_token = config.geyser_service_config.x_token.clone();
+        let access_token = config.geyser_service_config.access_token.clone();
         if let Some(tls_config) = tls_config {
             let cert = fs::read(&tls_config.cert_path)?;
             let key = fs::read(&tls_config.key_path)?;
@@ -139,7 +139,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
                 .map_err(|e| GeyserPluginError::Custom(e.into()))?;
         }
-        let svc = InterceptedService::new(svc, XTokenChecker::new(x_token));
+        let svc = InterceptedService::new(svc, AccessTokenChecker::new(access_token));
         runtime.spawn(
             server_builder
                 .add_service(svc)
@@ -480,21 +480,21 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
 }
 
 #[derive(Clone)]
-struct XTokenChecker {
-    x_token: Option<String>,
+struct AccessTokenChecker {
+    access_token: Option<String>,
 }
 
-impl XTokenChecker {
-    fn new(x_token: Option<String>) -> Self {
-        Self { x_token }
+impl AccessTokenChecker {
+    fn new(access_token: Option<String>) -> Self {
+        Self { access_token }
     }
 }
 
-impl Interceptor for XTokenChecker {
+impl Interceptor for AccessTokenChecker {
     fn call(&mut self, req: Request<()>) -> Result<Request<()>, Status> {
-        if let Some(x_token) = &self.x_token {
-            match req.metadata().get("x-token") {
-                Some(t) if x_token == t => Ok(req),
+        if let Some(access_token) = &self.access_token {
+            match req.metadata().get("access-token") {
+                Some(t) if access_token == t => Ok(req),
                 _ => Err(Status::unauthenticated("No valid auth token")),
             }
         } else {
