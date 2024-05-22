@@ -14,10 +14,7 @@ use jito_geyser_protos::solana::geyser::{
 };
 use prost_types::Timestamp;
 use solana_sdk::pubkey::Pubkey;
-use tonic::{
-    transport::{ClientTlsConfig, Endpoint},
-    Streaming,
-};
+use tonic::{transport::channel::Endpoint, Streaming};
 use uuid::Uuid;
 
 #[derive(Parser, Debug)]
@@ -73,11 +70,6 @@ async fn main() {
     println!("args: {args:?}");
 
     let mut endpoint = Endpoint::from_str(&args.url).unwrap();
-    if args.url.starts_with("https://") {
-        endpoint = endpoint
-            .tls_config(ClientTlsConfig::new())
-            .expect("create tls config");
-    }
 
     let channel = endpoint.connect().await.expect("connects");
 
