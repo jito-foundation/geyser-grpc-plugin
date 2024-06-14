@@ -69,7 +69,7 @@ async fn main() {
     let args: Args = Args::parse();
     println!("args: {args:?}");
 
-    let mut endpoint = Endpoint::from_str(&args.url).unwrap();
+    let endpoint = Endpoint::from_str(&args.url).unwrap();
 
     let channel = endpoint.connect().await.expect("connects");
 
