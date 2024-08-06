@@ -139,13 +139,17 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
                 .map_err(|e| GeyserPluginError::Custom(e.into()))?;
         }
-        let svc = InterceptedService::new(svc, AccessTokenChecker::new(access_token));
+        let server_builder_with_svc;
+        if let Some(access_token) = access_token {
+            let svc = InterceptedService::new(svc, AccessTokenChecker::new(access_token));
+            server_builder_with_svc = server_builder.add_service(svc);
+        } else {
+            server_builder_with_svc = server_builder.add_service(svc);
+        }
         runtime.spawn(
-            server_builder
-                .add_service(svc)
-                .serve_with_shutdown(addr, async move {
-                    let _ = server_exit_rx.await;
-                }),
+            server_builder_with_svc.serve_with_shutdown(addr, async move {
+                let _ = server_exit_rx.await;
+            }),
         );
 
         self.data = Some(PluginData {
@@ -481,24 +485,20 @@ pub unsafe extern "C" fn _create_plugin() -> *mut dyn GeyserPlugin {
 
 #[derive(Clone)]
 struct AccessTokenChecker {
-    access_token: Option<String>,
+    access_token: String,
 }
 
 impl AccessTokenChecker {
-    fn new(access_token: Option<String>) -> Self {
+    fn new(access_token: String) -> Self {
         Self { access_token }
     }
 }
 
 impl Interceptor for AccessTokenChecker {
     fn call(&mut self, req: Request<()>) -> Result<Request<()>, Status> {
-        if let Some(access_token) = &self.access_token {
-            match req.metadata().get("access-token") {
-                Some(t) if access_token == t => Ok(req),
-                _ => Err(Status::unauthenticated("Access token is incorrect")),
-            }
-        } else {
-            Ok(req)
+        match req.metadata().get("access-token") {
+            Some(t) if &self.access_token == t => Ok(req),
+            _ => Err(Status::unauthenticated("Access token is incorrect")),
         }
     }
 }
