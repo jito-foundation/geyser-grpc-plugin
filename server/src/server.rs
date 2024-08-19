@@ -282,6 +282,12 @@ pub enum GeyserServiceError {
 
 type GeyserServiceResult<T> = Result<T, GeyserServiceError>;
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ServerTlsConfig {
+    pub cert_path: String,
+    pub key_path: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct GeyserServiceConfig {
     /// Cadence of heartbeats.
@@ -289,6 +295,9 @@ pub struct GeyserServiceConfig {
 
     /// Individual subscriber buffer size.
     subscriber_buffer_size: usize,
+
+    pub tls_config: Option<ServerTlsConfig>,
+    pub access_token: Option<String>,
 }
 
 pub struct GeyserService {
