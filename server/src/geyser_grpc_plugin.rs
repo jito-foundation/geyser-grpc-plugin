@@ -139,18 +139,16 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                 .tls_config(ServerTlsConfig::new().identity(Identity::from_pem(cert, key)))
                 .map_err(|e| GeyserPluginError::Custom(e.into()))?;
         }
-        let server_builder_with_svc;
+        let s;
         if let Some(access_token) = access_token {
             let svc = InterceptedService::new(svc, AccessTokenChecker::new(access_token));
-            server_builder_with_svc = server_builder.add_service(svc);
+            s = server_builder.add_service(svc);
         } else {
-            server_builder_with_svc = server_builder.add_service(svc);
+            s = server_builder.add_service(svc);
         }
-        runtime.spawn(
-            server_builder_with_svc.serve_with_shutdown(addr, async move {
-                let _ = server_exit_rx.await;
-            }),
-        );
+        runtime.spawn(s.serve_with_shutdown(addr, async move {
+            let _ = server_exit_rx.await;
+        }));
 
         self.data = Some(PluginData {
             runtime,
