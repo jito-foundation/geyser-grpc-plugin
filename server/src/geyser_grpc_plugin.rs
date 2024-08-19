@@ -1,12 +1,11 @@
 //! Implements the geyser plugin interface.
 
-use std::fs;
-use std::sync::atomic::AtomicBool;
 use std::{
+    fs,
     fs::File,
     io::Read,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::SystemTime,
@@ -30,10 +29,11 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use tokio::{runtime::Runtime, sync::oneshot};
-use tonic::service::interceptor::InterceptedService;
-use tonic::service::Interceptor;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
-use tonic::{Request, Status};
+use tonic::{
+    service::{interceptor::InterceptedService, Interceptor},
+    transport::{Identity, Server, ServerTlsConfig},
+    Request, Status,
+};
 
 use crate::server::{GeyserService, GeyserServiceConfig};
 
