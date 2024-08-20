@@ -11,6 +11,10 @@ use std::{
     time::SystemTime,
 };
 
+use agave_geyser_plugin_interface::geyser_plugin_interface::{
+    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
+    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
+};
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
 use jito_geyser_protos::solana::{
@@ -24,10 +28,6 @@ use jito_geyser_protos::solana::{
 use log::*;
 use serde_derive::Deserialize;
 use serde_json;
-use solana_geyser_plugin_interface::geyser_plugin_interface::{
-    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
-};
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
@@ -436,6 +436,26 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     slot: block.slot,
                     blockhash: block.blockhash.to_string(),
                     rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
+                    block_time: block.block_time.map(|t| prost_types::Timestamp {
+                        seconds: t,
+                        nanos: 0,
+                    }),
+                    block_height: block.block_height,
+                    executed_transaction_count: Some(block.executed_transaction_count),
+                    entry_count: Some(block.entry_count),
+                }),
+            },
+            ReplicaBlockInfoVersions::V0_0_4(block) => TimestampedBlockUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                block_update: Some(BlockUpdate {
+                    slot: block.slot,
+                    blockhash: block.blockhash.to_string(),
+                    rewards: block
+                        .rewards
+                        .rewards
+                        .iter()
+                        .map(|r| (*r).clone().into())
+                        .collect(),
                     block_time: block.block_time.map(|t| prost_types::Timestamp {
                         seconds: t,
                         nanos: 0,

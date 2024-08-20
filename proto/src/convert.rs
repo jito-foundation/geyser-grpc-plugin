@@ -1,4 +1,3 @@
-//! Note: most of this copied from solana labs storage-proto files, with the addition of the module definitions below
 use std::{
     convert::{TryFrom, TryInto},
     str::FromStr,
@@ -19,21 +18,28 @@ use solana_sdk::{
     transaction_context::TransactionReturnData,
 };
 use solana_transaction_status::{
-    ConfirmedBlock, InnerInstruction, InnerInstructions, Reward, RewardType, TransactionByAddrInfo,
-    TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
-    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
+    RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
+    TransactionWithStatusMeta, VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
 
+use crate::solana::{entries, tx_by_addr};
 use crate::{solana::storage::confirmed_block, StoredExtendedRewards, StoredTransactionStatusMeta};
-
-pub mod tx_by_addr {
-    tonic::include_proto!("solana.storage.transaction_by_addr");
-}
 
 impl From<Vec<Reward>> for confirmed_block::Rewards {
     fn from(rewards: Vec<Reward>) -> Self {
         Self {
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
+            num_partitions: None,
+        }
+    }
+}
+
+impl From<RewardsAndNumPartitions> for confirmed_block::Rewards {
+    fn from(input: RewardsAndNumPartitions) -> Self {
+        Self {
+            rewards: input.rewards.into_iter().map(|r| r.into()).collect(),
+            num_partitions: input.num_partitions.map(|n| n.into()),
         }
     }
 }
@@ -41,6 +47,17 @@ impl From<Vec<Reward>> for confirmed_block::Rewards {
 impl From<confirmed_block::Rewards> for Vec<Reward> {
     fn from(rewards: confirmed_block::Rewards) -> Self {
         rewards.rewards.into_iter().map(|r| r.into()).collect()
+    }
+}
+
+impl From<confirmed_block::Rewards> for (Vec<Reward>, Option<u64>) {
+    fn from(rewards: confirmed_block::Rewards) -> Self {
+        (
+            rewards.rewards.into_iter().map(|r| r.into()).collect(),
+            rewards
+                .num_partitions
+                .map(|confirmed_block::NumPartitions { num_partitions }| num_partitions),
+        )
     }
 }
 
@@ -54,6 +71,7 @@ impl From<StoredExtendedRewards> for confirmed_block::Rewards {
                     r.into()
                 })
                 .collect(),
+            num_partitions: None,
         }
     }
 }
@@ -108,6 +126,12 @@ impl From<confirmed_block::Reward> for Reward {
     }
 }
 
+impl From<u64> for confirmed_block::NumPartitions {
+    fn from(num_partitions: u64) -> Self {
+        Self { num_partitions }
+    }
+}
+
 impl From<VersionedConfirmedBlock> for confirmed_block::ConfirmedBlock {
     fn from(confirmed_block: VersionedConfirmedBlock) -> Self {
         let VersionedConfirmedBlock {
@@ -116,6 +140,7 @@ impl From<VersionedConfirmedBlock> for confirmed_block::ConfirmedBlock {
             parent_slot,
             transactions,
             rewards,
+            num_partitions,
             block_time,
             block_height,
         } = confirmed_block;
@@ -126,6 +151,7 @@ impl From<VersionedConfirmedBlock> for confirmed_block::ConfirmedBlock {
             parent_slot,
             transactions: transactions.into_iter().map(|tx| tx.into()).collect(),
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
+            num_partitions: num_partitions.map(Into::into),
             block_time: block_time.map(|timestamp| confirmed_block::UnixTimestamp { timestamp }),
             block_height: block_height
                 .map(|block_height| confirmed_block::BlockHeight { block_height }),
@@ -144,6 +170,7 @@ impl TryFrom<confirmed_block::ConfirmedBlock> for ConfirmedBlock {
             parent_slot,
             transactions,
             rewards,
+            num_partitions,
             block_time,
             block_height,
         } = confirmed_block;
@@ -157,6 +184,8 @@ impl TryFrom<confirmed_block::ConfirmedBlock> for ConfirmedBlock {
                 .map(|tx| tx.try_into())
                 .collect::<std::result::Result<Vec<_>, Self::Error>>()?,
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
+            num_partitions: num_partitions
+                .map(|confirmed_block::NumPartitions { num_partitions }| num_partitions),
             block_time: block_time.map(|confirmed_block::UnixTimestamp { timestamp }| timestamp),
             block_height: block_height
                 .map(|confirmed_block::BlockHeight { block_height }| block_height),
@@ -808,6 +837,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             33 => TransactionError::InvalidLoadedAccountsDataSizeLimit,
             34 => TransactionError::ResanitizationNeeded,
             36 => TransactionError::UnbalancedTransaction,
+            37 => TransactionError::ProgramCacheHitMaxLimit,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -925,6 +955,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 }
                 TransactionError::UnbalancedTransaction => {
                     tx_by_addr::TransactionErrorType::UnbalancedTransaction
+                }
+                TransactionError::ProgramCacheHitMaxLimit => {
+                    tx_by_addr::TransactionErrorType::ProgramCacheHitMaxLimit
                 }
             } as i32,
             instruction_error: match transaction_error {
@@ -1181,6 +1214,29 @@ impl TryFrom<tx_by_addr::TransactionByAddr> for Vec<TransactionByAddrInfo> {
             .into_iter()
             .map(|tx_by_addr| tx_by_addr.try_into())
             .collect::<Result<Vec<TransactionByAddrInfo>, Self::Error>>()
+    }
+}
+
+impl From<(usize, EntrySummary)> for entries::Entry {
+    fn from((index, entry_summary): (usize, EntrySummary)) -> Self {
+        entries::Entry {
+            index: index as u32,
+            num_hashes: entry_summary.num_hashes,
+            hash: entry_summary.hash.as_ref().into(),
+            num_transactions: entry_summary.num_transactions,
+            starting_transaction_index: entry_summary.starting_transaction_index as u32,
+        }
+    }
+}
+
+impl From<entries::Entry> for EntrySummary {
+    fn from(entry: entries::Entry) -> Self {
+        EntrySummary {
+            num_hashes: entry.num_hashes,
+            hash: Hash::new(&entry.hash),
+            num_transactions: entry.num_transactions,
+            starting_transaction_index: entry.starting_transaction_index as usize,
+        }
     }
 }
 

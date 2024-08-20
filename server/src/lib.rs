@@ -3,7 +3,7 @@ pub mod server;
 pub(crate) mod subscription_stream;
 
 #[cfg(not(feature = "jito-solana"))]
-extern crate solana_geyser_plugin_interface;
+extern crate agave_geyser_plugin_interface;
 #[cfg(not(feature = "jito-solana"))]
 extern crate solana_logger;
 #[cfg(not(feature = "jito-solana"))]
@@ -16,7 +16,7 @@ extern crate solana_sdk;
 extern crate solana_vote_program;
 
 #[cfg(feature = "jito-solana")]
-extern crate jito_solana_geyser_plugin_interface as solana_geyser_plugin_interface;
+extern crate jito_solana_geyser_plugin_interface as agave_geyser_plugin_interface;
 #[cfg(feature = "jito-solana")]
 extern crate jito_solana_logger as solana_logger;
 #[cfg(feature = "jito-solana")]

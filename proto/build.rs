@@ -18,8 +18,9 @@ fn main() {
         )
         .compile(
             &[
-                "proto/geyser.proto",
                 "proto/confirmed_block.proto",
+                "proto/entries.proto",
+                "proto/geyser.proto",
                 "proto/transaction_by_addr.proto",
             ],
             &["proto"],

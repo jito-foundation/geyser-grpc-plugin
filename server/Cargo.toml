@@ -9,6 +9,7 @@ edition = { workspace = true }
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+agave-geyser-plugin-interface = { workspace = true }
 bs58 = { workspace = true }
 crossbeam-channel = { workspace = true }
 futures-util = { workspace = true }
@@ -20,7 +21,6 @@ prost-types = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
-solana-geyser-plugin-interface = { workspace = true }
 solana-logger = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program = { workspace = true }
