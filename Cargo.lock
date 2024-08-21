@@ -1326,7 +1326,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-plugin-client"
-version = "1.18.1"
+version = "2.0.0"
 dependencies = [
  "jito-geyser-protos",
  "log",
@@ -1345,7 +1345,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-plugin-server"
-version = "1.18.1"
+version = "2.0.0"
 dependencies = [
  "bs58 0.5.1",
  "crossbeam-channel",
@@ -1706,7 +1706,7 @@ checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
 
 [[package]]
 name = "jito-geyser-cli"
-version = "1.18.1"
+version = "2.0.0"
 dependencies = [
  "clap",
  "futures-util",
@@ -1721,7 +1721,7 @@ dependencies = [
 
 [[package]]
 name = "jito-geyser-protos"
-version = "1.18.1"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "bs58 0.5.1",
