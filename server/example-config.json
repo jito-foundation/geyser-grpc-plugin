@@ -3,6 +3,7 @@
   "bind_address": "0.0.0.0:10000",
   "account_update_buffer_size": 100000,
   "slot_update_buffer_size": 100000,
+  "slot_entry_update_buffer_size": 1000000,
   "block_update_buffer_size": 100000,
   "transaction_update_buffer_size": 100000,
   "geyser_service_config": {
