@@ -15,8 +15,9 @@ use jito_geyser_protos::solana::geyser::{
     GetHeartbeatIntervalResponse, Heartbeat, MaybePartialAccountUpdate, PartialAccountUpdate,
     SubscribeAccountUpdatesRequest, SubscribeBlockUpdatesRequest,
     SubscribePartialAccountUpdatesRequest, SubscribeProgramsUpdatesRequest,
-    SubscribeSlotUpdateRequest, SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate,
-    TimestampedBlockUpdate, TimestampedSlotUpdate, TimestampedTransactionUpdate,
+    SubscribeSlotEntryUpdateRequest, SubscribeSlotUpdateRequest,
+    SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate, TimestampedBlockUpdate,
+    TimestampedSlotEntryUpdate, TimestampedSlotUpdate, TimestampedTransactionUpdate,
 };
 use log::*;
 use once_cell::sync::OnceCell;
@@ -48,6 +49,7 @@ impl StreamClosedSender<SubscriptionClosedEvent> for SubscriptionClosedSender {
 type AccountUpdateSender = TokioSender<Result<TimestampedAccountUpdate, Status>>;
 type PartialAccountUpdateSender = TokioSender<Result<MaybePartialAccountUpdate, Status>>;
 type SlotUpdateSender = TokioSender<Result<TimestampedSlotUpdate, Status>>;
+type SlotEntryUpdateSender = TokioSender<Result<TimestampedSlotEntryUpdate, Status>>;
 type TransactionUpdateSender = TokioSender<Result<TimestampedTransactionUpdate, Status>>;
 type BlockUpdateSender = TokioSender<Result<TimestampedBlockUpdate, Status>>;
 
@@ -144,7 +146,24 @@ struct SlotUpdateSubscription {
     subscription_tx: SlotUpdateSender,
 }
 
+struct SlotEntryUpdateSubscription {
+    subscription_tx: SlotEntryUpdateSender,
+}
+
 impl ErrorStatusStreamer for SlotUpdateSubscription {
+    fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
+        self.subscription_tx
+            .try_send(Err(status))
+            .map_err(|e| match e {
+                TokioTrySendError::Full(_) => GeyserServiceError::NotificationReceiverFull,
+                TokioTrySendError::Closed(_) => {
+                    GeyserServiceError::NotificationReceiverDisconnected
+                }
+            })
+    }
+}
+
+impl ErrorStatusStreamer for SlotEntryUpdateSubscription {
     fn stream_error(&self, status: Status) -> GeyserServiceResult<()> {
         self.subscription_tx
             .try_send(Err(status))
@@ -212,6 +231,10 @@ enum SubscriptionAddedEvent {
         uuid: Uuid,
         notification_sender: SlotUpdateSender,
     },
+    SlotEntryUpdateSubscription {
+        uuid: Uuid,
+        notification_sender: SlotEntryUpdateSender,
+    },
     TransactionUpdateSubscription {
         uuid: Uuid,
         notification_sender: TransactionUpdateSender,
@@ -233,6 +256,9 @@ impl Debug for SubscriptionAddedEvent {
             }
             SubscriptionAddedEvent::SlotUpdateSubscription { uuid, .. } => {
                 ("subscribe_slot_update".to_string(), uuid)
+            }
+            SubscriptionAddedEvent::SlotEntryUpdateSubscription { uuid, .. } => {
+                ("subscribe_slot_entry_update".to_string(), uuid)
             }
             SubscriptionAddedEvent::ProgramUpdateSubscription { uuid, .. } => {
                 ("program_update_subscribe".to_string(), uuid)
@@ -264,6 +290,7 @@ enum SubscriptionClosedEvent {
     ProgramUpdateSubscription(Uuid),
     PartialAccountUpdateSubscription(Uuid),
     SlotUpdateSubscription(Uuid),
+    SlotEntryUpdateSubscription(Uuid),
     TransactionUpdateSubscription(Uuid),
     BlockUpdateSubscription(Uuid),
 }
@@ -316,6 +343,8 @@ impl GeyserService {
         account_update_rx: Receiver<TimestampedAccountUpdate>,
         // Slot updates streamed from the validator.
         slot_update_rx: Receiver<TimestampedSlotUpdate>,
+        // Slot updates streamed from the validator.
+        slot_entry_update_rx: Receiver<TimestampedSlotEntryUpdate>,
         // Block metadata receiver
         block_update_receiver: Receiver<TimestampedBlockUpdate>,
         // Transaction updates
@@ -330,6 +359,7 @@ impl GeyserService {
         let t_hdl = Self::event_loop(
             account_update_rx,
             slot_update_rx,
+            slot_entry_update_rx,
             block_update_receiver,
             transaction_update_receiver,
             subscription_added_rx,
@@ -356,9 +386,11 @@ impl GeyserService {
     ///     1. Add new subscriptions.
     ///     2. Cleanup closed subscriptions.
     ///     3. Receive geyser events and stream them to subscribers.
+    #[allow(clippy::too_many_arguments)]
     fn event_loop(
         account_update_rx: Receiver<TimestampedAccountUpdate>,
         slot_update_rx: Receiver<TimestampedSlotUpdate>,
+        slot_entry_update_rx: Receiver<TimestampedSlotEntryUpdate>,
         block_update_receiver: Receiver<TimestampedBlockUpdate>,
         transaction_update_receiver: Receiver<TimestampedTransactionUpdate>,
         subscription_added_rx: Receiver<SubscriptionAddedEvent>,
@@ -378,6 +410,7 @@ impl GeyserService {
                     PartialAccountUpdateSubscription,
                 > = HashMap::new();
                 let mut slot_update_subscriptions: HashMap<Uuid, SlotUpdateSubscription> = HashMap::new();
+                let mut slot_entry_update_subscriptions: HashMap<Uuid, SlotEntryUpdateSubscription> = HashMap::new();
 
                 let mut transaction_update_subscriptions: HashMap<Uuid, TransactionUpdateSubscription> = HashMap::new();
                 let mut block_update_subscriptions: HashMap<Uuid, BlockUpdateSubscription> = HashMap::new();
@@ -391,14 +424,14 @@ impl GeyserService {
                         }
                         recv(subscription_added_rx) -> maybe_subscription_added => {
                             info!("received new subscription");
-                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_added(maybe_subscription_added, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions,&mut slot_entry_update_subscriptions,  &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
                                 error!("error adding new subscription: {}", e);
                                 return;
                             }
                         },
                         recv(subscription_closed_rx) -> maybe_subscription_closed => {
                             info!("closing subscription");
-                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
+                            if let Err(e) = Self::handle_subscription_closed(maybe_subscription_closed, &mut account_update_subscriptions, &mut partial_account_update_subscriptions, &mut slot_update_subscriptions, &mut slot_entry_update_subscriptions, &mut program_update_subscriptions, &mut transaction_update_subscriptions, &mut block_update_subscriptions) {
                                 error!("error closing existing subscription: {}", e);
                                 return;
                             }
@@ -426,6 +459,18 @@ impl GeyserService {
                                 },
                                 Ok(failed_subscription_ids) => {
                                     Self::drop_subscriptions(&failed_subscription_ids, &mut slot_update_subscriptions);
+                                },
+                            }
+                        },
+                        recv(slot_entry_update_rx) -> maybe_slot_entry_update => {
+                            debug!("received slot entry update");
+                            match Self::handle_slot_entry_update_event(maybe_slot_entry_update, &slot_entry_update_subscriptions) {
+                                Err(e) => {
+                                    error!("error handling a slot entry update event: {}", e);
+                                    return;
+                                },
+                                Ok(failed_subscription_ids) => {
+                                    Self::drop_subscriptions(&failed_subscription_ids, &mut slot_entry_update_subscriptions);
                                 },
                             }
                         },
@@ -501,11 +546,13 @@ impl GeyserService {
     }
 
     /// Handles adding new subscriptions.
+    #[allow(clippy::too_many_arguments)]
     fn handle_subscription_added(
         maybe_subscription_added: Result<SubscriptionAddedEvent, RecvError>,
         account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
+        slot_entry_update_subscriptions: &mut HashMap<Uuid, SlotEntryUpdateSubscription>,
         program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         transaction_update_subscriptions: &mut HashMap<Uuid, TransactionUpdateSubscription>,
         block_update_subscriptions: &mut HashMap<Uuid, BlockUpdateSubscription>,
@@ -545,6 +592,13 @@ impl GeyserService {
                 notification_sender: subscription_tx,
             } => {
                 slot_update_subscriptions.insert(uuid, SlotUpdateSubscription { subscription_tx });
+            }
+            SubscriptionAddedEvent::SlotEntryUpdateSubscription {
+                uuid,
+                notification_sender: subscription_tx,
+            } => {
+                slot_entry_update_subscriptions
+                    .insert(uuid, SlotEntryUpdateSubscription { subscription_tx });
             }
             SubscriptionAddedEvent::ProgramUpdateSubscription {
                 uuid,
@@ -587,11 +641,13 @@ impl GeyserService {
     }
 
     /// Handles closing existing subscriptions.
+    #[allow(clippy::too_many_arguments)]
     fn handle_subscription_closed(
         maybe_subscription_closed: Result<SubscriptionClosedEvent, RecvError>,
         account_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         partial_account_update_subscriptions: &mut HashMap<Uuid, PartialAccountUpdateSubscription>,
         slot_update_subscriptions: &mut HashMap<Uuid, SlotUpdateSubscription>,
+        slot_entry_update_subscriptions: &mut HashMap<Uuid, SlotEntryUpdateSubscription>,
         program_update_subscriptions: &mut HashMap<Uuid, AccountUpdateSubscription>,
         transaction_update_subscriptions: &mut HashMap<Uuid, TransactionUpdateSubscription>,
         block_update_subscriptions: &mut HashMap<Uuid, BlockUpdateSubscription>,
@@ -608,6 +664,9 @@ impl GeyserService {
             }
             SubscriptionClosedEvent::SlotUpdateSubscription(subscription_id) => {
                 let _ = slot_update_subscriptions.remove(&subscription_id);
+            }
+            SubscriptionClosedEvent::SlotEntryUpdateSubscription(subscription_id) => {
+                let _ = slot_entry_update_subscriptions.remove(&subscription_id);
             }
             SubscriptionClosedEvent::ProgramUpdateSubscription(subscription_id) => {
                 let _ = program_update_subscriptions.remove(&subscription_id);
@@ -719,6 +778,30 @@ impl GeyserService {
             .filter_map(|(uuid, sub)| {
                 if matches!(
                     sub.subscription_tx.try_send(Ok(slot_update.clone())),
+                    Err(TokioTrySendError::Closed(_))
+                ) {
+                    Some(*uuid)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Ok(failed_subscription_ids)
+    }
+
+    /// Streams slot updates to subscribers
+    /// Returns a vector of UUIDs that failed to send to due to the subscription being closed
+    fn handle_slot_entry_update_event(
+        maybe_slot_entry_update: Result<TimestampedSlotEntryUpdate, RecvError>,
+        slot_entry_update_subscriptions: &HashMap<Uuid, SlotEntryUpdateSubscription>,
+    ) -> GeyserServiceResult<Vec<Uuid>> {
+        let slot_entry_update = maybe_slot_entry_update?;
+        let failed_subscription_ids = slot_entry_update_subscriptions
+            .iter()
+            .filter_map(|(uuid, sub)| {
+                if matches!(
+                    sub.subscription_tx.try_send(Ok(slot_entry_update.clone())),
                     Err(TokioTrySendError::Closed(_))
                 ) {
                     Some(*uuid)
@@ -922,6 +1005,46 @@ impl Geyser for GeyserService {
                 SubscriptionClosedEvent::SlotUpdateSubscription(uuid),
             ),
             "subscribe_slot_updates",
+        );
+        let mut resp = Response::new(stream);
+        resp.metadata_mut().insert(
+            HIGHEST_WRITE_SLOT_HEADER,
+            MetadataValue::from(self.highest_write_slot.load(Ordering::Relaxed)),
+        );
+
+        Ok(resp)
+    }
+
+    type SubscribeSlotEntryUpdatesStream = SubscriptionStream<Uuid, TimestampedSlotEntryUpdate>;
+    async fn subscribe_slot_entry_updates(
+        &self,
+        _request: Request<SubscribeSlotEntryUpdateRequest>,
+    ) -> Result<Response<Self::SubscribeSlotEntryUpdatesStream>, Status> {
+        let (subscription_tx, subscription_rx) =
+            channel(self.service_config.subscriber_buffer_size);
+
+        let uuid = Uuid::new_v4();
+        self.subscription_added_tx
+            .try_send(SubscriptionAddedEvent::SlotEntryUpdateSubscription {
+                uuid,
+                notification_sender: subscription_tx,
+            })
+            .map_err(|e| {
+                error!(
+                    "failed to add subscribe_slot_entry_updates subscription: {}",
+                    e
+                );
+                Status::internal("error adding subscription")
+            })?;
+
+        let stream = SubscriptionStream::new(
+            subscription_rx,
+            uuid,
+            (
+                self.subscription_closed_sender.clone(),
+                SubscriptionClosedEvent::SlotEntryUpdateSubscription(uuid),
+            ),
+            "subscribe_slot_entry_updates",
         );
         let mut resp = Response::new(stream);
         resp.metadata_mut().insert(

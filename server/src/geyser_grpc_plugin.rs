@@ -4,20 +4,19 @@ use std::{
     fs::File,
     io::Read,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc,
     },
     time::SystemTime,
 };
-use std::sync::atomic::AtomicBool;
 
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
 use jito_geyser_protos::solana::{
     geyser::{
         geyser_server::GeyserServer, AccountUpdate, BlockUpdate, SlotUpdate, SlotUpdateStatus,
-        TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotUpdate,
-        TimestampedTransactionUpdate, TransactionUpdate,
+        TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotEntryUpdate,
+        TimestampedSlotUpdate, TimestampedTransactionUpdate, TransactionUpdate,
     },
     storage::confirmed_block::ConfirmedTransaction,
 };
@@ -26,7 +25,7 @@ use serde_derive::Deserialize;
 use serde_json;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
+    ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::transport::Server;
@@ -40,6 +39,7 @@ pub struct PluginData {
     /// Where updates are piped thru to the grpc service.
     account_update_sender: Sender<TimestampedAccountUpdate>,
     slot_update_sender: Sender<TimestampedSlotUpdate>,
+    slot_entry_update_sender: Sender<TimestampedSlotEntryUpdate>,
     block_update_sender: Sender<TimestampedBlockUpdate>,
     transaction_update_sender: Sender<TimestampedTransactionUpdate>,
 
@@ -47,7 +47,7 @@ pub struct PluginData {
     highest_write_slot: Arc<AtomicU64>,
 
     is_startup_completed: AtomicBool,
-    ignore_startup_updates: bool
+    ignore_startup_updates: bool,
 }
 
 #[derive(Default)]
@@ -68,9 +68,10 @@ pub struct PluginConfig {
     pub bind_address: String,
     pub account_update_buffer_size: usize,
     pub slot_update_buffer_size: usize,
+    pub slot_entry_update_buffer_size: usize,
     pub block_update_buffer_size: usize,
     pub transaction_update_buffer_size: usize,
-    pub skip_startup_stream: Option<bool>
+    pub skip_startup_stream: Option<bool>,
 }
 
 impl GeyserPlugin for GeyserGrpcPlugin {
@@ -108,6 +109,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         let highest_write_slot = Arc::new(AtomicU64::new(0));
         let (account_update_sender, account_update_rx) = bounded(config.account_update_buffer_size);
         let (slot_update_sender, slot_update_rx) = bounded(config.slot_update_buffer_size);
+        let (slot_entry_update_sender, slot_entry_update_rx) =
+            bounded(config.slot_entry_update_buffer_size);
 
         let (block_update_sender, block_update_receiver) = bounded(config.block_update_buffer_size);
         let (transaction_update_sender, transaction_update_receiver) =
@@ -117,6 +120,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             config.geyser_service_config,
             account_update_rx,
             slot_update_rx,
+            slot_entry_update_rx,
             block_update_receiver,
             transaction_update_receiver,
             highest_write_slot.clone(),
@@ -138,12 +142,13 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             server_exit_sender: server_exit_tx,
             account_update_sender,
             slot_update_sender,
+            slot_entry_update_sender,
             block_update_sender,
             transaction_update_sender,
             highest_write_slot,
             is_startup_completed: AtomicBool::new(false),
             // don't skip startup to keep backwards compatability
-            ignore_startup_updates: config.skip_startup_stream.unwrap_or(false)
+            ignore_startup_updates: config.skip_startup_stream.unwrap_or(false),
         });
         info!("plugin data initialized");
 
@@ -161,7 +166,11 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn notify_end_of_startup(&self) -> PluginResult<()> {
-        self.data.as_ref().unwrap().is_startup_completed.store(true, Ordering::Relaxed);
+        self.data
+            .as_ref()
+            .unwrap()
+            .is_startup_completed
+            .store(true, Ordering::Relaxed);
         Ok(())
     }
 
@@ -447,6 +456,61 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
     fn transaction_notifications_enabled(&self) -> bool {
         true
+    }
+
+    fn entry_notifications_enabled(&self) -> bool {
+        true
+    }
+
+    fn notify_entry(&self, entry: ReplicaEntryInfoVersions) -> PluginResult<()> {
+        let data = self.data.as_ref().expect("plugin must be initialized");
+
+        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let slot_entry = utils::get_slot_and_index_from_replica_entry_info_versions(&entry);
+
+        debug!(
+            "Updating slot entry {} at index {}",
+            slot_entry.slot, slot_entry.index
+        );
+
+        match data
+            .slot_entry_update_sender
+            .try_send(TimestampedSlotEntryUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                entry_update: Some(slot_entry),
+            }) {
+            Ok(_) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                warn!("slot_entry_update channel full, skipping");
+                Ok(())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                error!("slot entry info send error");
+                Err(GeyserPluginError::SlotStatusUpdateError {
+                    msg: "slot_entry_update channel disconnected, exiting".to_string(),
+                })
+            }
+        }
+    }
+}
+
+mod utils {
+    use jito_geyser_protos::solana::geyser::SlotEntryUpdate;
+    use solana_geyser_plugin_interface::geyser_plugin_interface::ReplicaEntryInfoVersions;
+
+    pub fn get_slot_and_index_from_replica_entry_info_versions(
+        entry: &ReplicaEntryInfoVersions,
+    ) -> SlotEntryUpdate {
+        match entry {
+            ReplicaEntryInfoVersions::V0_0_1(entry_info) => SlotEntryUpdate {
+                slot: entry_info.slot,
+                index: entry_info.index as u64,
+                executed_transaction_count: entry_info.executed_transaction_count,
+            },
+        }
     }
 }
 

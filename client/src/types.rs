@@ -136,3 +136,17 @@ impl From<geyser::SlotUpdate> for SlotUpdate {
         }
     }
 }
+
+pub struct SlotEntryUpdate {
+    pub slot: Slot,
+    pub index: u64,
+}
+
+impl From<geyser::SlotEntryUpdate> for SlotEntryUpdate {
+    fn from(proto: geyser::SlotEntryUpdate) -> Self {
+        Self {
+            slot: proto.slot,
+            index: proto.index,
+        }
+    }
+}
