@@ -19,7 +19,8 @@ use std::{
 use jito_geyser_protos::solana::geyser::{
     geyser_client::GeyserClient, maybe_partial_account_update, EmptyRequest,
     MaybePartialAccountUpdate, SubscribeAccountUpdatesRequest,
-    SubscribePartialAccountUpdatesRequest, SubscribeSlotUpdateRequest, TimestampedAccountUpdate,
+    SubscribePartialAccountUpdatesRequest, SubscribeSlotEntryUpdateRequest,
+    SubscribeSlotUpdateRequest, TimestampedAccountUpdate,
 };
 use log::*;
 use lru::LruCache;
@@ -32,7 +33,9 @@ use tonic::{codegen::InterceptedService, transport::Channel, Response, Status};
 
 use crate::{
     geyser_consumer::GeyserConsumerError::{MissedHeartbeat, StreamClosed},
-    types::{AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotUpdate},
+    types::{
+        AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotEntryUpdate, SlotUpdate,
+    },
     GrpcInterceptor, Pubkey, Slot,
 };
 
@@ -236,6 +239,35 @@ impl GeyserConsumer {
                 }
                 Ok(None) => return Err(StreamClosed),
                 Err(e) => return Err(e.into()),
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn consume_slot_entry_updates(
+        &self,
+        slot_updates_tx: UnboundedSender<SlotEntryUpdate>,
+    ) -> Result<()> {
+        let mut c = self.client.clone();
+
+        let resp = c
+            .subscribe_slot_entry_updates(SubscribeSlotEntryUpdateRequest {})
+            .await?;
+        let mut stream = resp.into_inner();
+
+        while !self.exit.load(Ordering::Relaxed) {
+            match stream.message().await {
+                Ok(Some(slot_update)) => {
+                    if slot_updates_tx
+                        .send(SlotEntryUpdate::from(slot_update.entry_update.unwrap()))
+                        .is_err()
+                    {
+                        return Err(GeyserConsumerError::ConsumerChannelDisconnected);
+                    };
+                }
+                Ok(None) => return Err(StreamClosed),
+                Err(e) => return Err(GeyserConsumerError::from(e)),
             }
         }
 

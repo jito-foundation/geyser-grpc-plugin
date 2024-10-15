@@ -13,21 +13,22 @@ use std::{
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
+    ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
 use jito_geyser_protos::solana::{
     geyser::{
         geyser_server::GeyserServer, AccountUpdate, BlockUpdate, SlotUpdate, SlotUpdateStatus,
-        TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotUpdate,
-        TimestampedTransactionUpdate, TransactionUpdate,
+        TimestampedAccountUpdate, TimestampedBlockUpdate, TimestampedSlotEntryUpdate,
+        TimestampedSlotUpdate, TimestampedTransactionUpdate, TransactionUpdate,
     },
     storage::confirmed_block::ConfirmedTransaction,
 };
 use log::*;
 use serde_derive::Deserialize;
 use serde_json;
+use serde_with::{serde_as, DefaultOnError};
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
@@ -35,7 +36,10 @@ use tonic::{
     Request, Status,
 };
 
-use crate::server::{GeyserService, GeyserServiceConfig};
+use crate::{
+    compact_timestamp,
+    server::{GeyserService, GeyserServiceConfig},
+};
 
 pub struct PluginData {
     runtime: Runtime,
@@ -44,6 +48,7 @@ pub struct PluginData {
     /// Where updates are piped thru to the grpc service.
     account_update_sender: Sender<TimestampedAccountUpdate>,
     slot_update_sender: Sender<TimestampedSlotUpdate>,
+    slot_entry_update_sender: Sender<TimestampedSlotEntryUpdate>,
     block_update_sender: Sender<TimestampedBlockUpdate>,
     transaction_update_sender: Sender<TimestampedTransactionUpdate>,
 
@@ -67,16 +72,44 @@ impl std::fmt::Debug for GeyserGrpcPlugin {
     }
 }
 
+/// Helper macro to generate default functions for setting different values.
+/// Sample usage:
+/// generate_default_fns! {
+///    default_slot_entry_update_buffer_size: usize = PluginConfig::DEFAULT_SLOT_ENTRY_UPDATE_BUFFER_SIZE,
+/// }
+macro_rules! generate_default_fns {
+    ($($name:ident: $type:ty = $value:expr),* $(,)?) => {
+        $(
+            fn $name() -> $type {
+                $value
+            }
+        )*
+    };
+}
+
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct PluginConfig {
     pub geyser_service_config: GeyserServiceConfig,
     pub bind_address: String,
     pub account_update_buffer_size: usize,
     pub slot_update_buffer_size: usize,
+    #[serde_as(deserialize_as = "DefaultOnError")]
+    #[serde(default = "default_slot_entry_update_buffer_size")]
+    pub slot_entry_update_buffer_size: usize,
     pub block_update_buffer_size: usize,
     pub transaction_update_buffer_size: usize,
     pub skip_startup_stream: Option<bool>,
     pub account_data_notifications_enabled: Option<bool>,
+}
+
+impl PluginConfig {
+    const DEFAULT_SLOT_ENTRY_UPDATE_BUFFER_SIZE: usize = 1_000_000;
+}
+
+// Can add default values for other fields here
+generate_default_fns! {
+    default_slot_entry_update_buffer_size: usize = PluginConfig::DEFAULT_SLOT_ENTRY_UPDATE_BUFFER_SIZE,
 }
 
 impl GeyserPlugin for GeyserGrpcPlugin {
@@ -114,6 +147,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         let highest_write_slot = Arc::new(AtomicU64::new(0));
         let (account_update_sender, account_update_rx) = bounded(config.account_update_buffer_size);
         let (slot_update_sender, slot_update_rx) = bounded(config.slot_update_buffer_size);
+        let (slot_entry_update_sender, slot_entry_update_rx) =
+            bounded(config.slot_entry_update_buffer_size);
 
         let (block_update_sender, block_update_receiver) = bounded(config.block_update_buffer_size);
         let (transaction_update_sender, transaction_update_receiver) =
@@ -123,6 +158,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             config.geyser_service_config.clone(),
             account_update_rx,
             slot_update_rx,
+            slot_entry_update_rx,
             block_update_receiver,
             transaction_update_receiver,
             highest_write_slot.clone(),
@@ -157,6 +193,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             server_exit_sender: server_exit_tx,
             account_update_sender,
             slot_update_sender,
+            slot_entry_update_sender,
             block_update_sender,
             transaction_update_sender,
             highest_write_slot,
@@ -491,6 +528,66 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     fn transaction_notifications_enabled(&self) -> bool {
         true
     }
+
+    fn entry_notifications_enabled(&self) -> bool {
+        true
+    }
+
+    fn notify_entry(&self, entry: ReplicaEntryInfoVersions) -> PluginResult<()> {
+        let data = self.data.as_ref().expect("plugin must be initialized");
+
+        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let slot_entry = utils::get_slot_and_index_from_replica_entry_info_versions(&entry);
+
+        debug!(
+            "Updating slot entry {} at index {}",
+            slot_entry.slot, slot_entry.index
+        );
+
+        match data
+            .slot_entry_update_sender
+            .try_send(TimestampedSlotEntryUpdate {
+                ts: compact_timestamp::get_current_time_us_u32(),
+                entry_update: Some(slot_entry),
+            }) {
+            Ok(_) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                warn!("slot_entry_update channel full, skipping");
+                Ok(())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                error!("slot entry info send error");
+                Err(GeyserPluginError::SlotStatusUpdateError {
+                    msg: "slot_entry_update channel disconnected, exiting".to_string(),
+                })
+            }
+        }
+    }
+}
+
+mod utils {
+    use agave_geyser_plugin_interface::geyser_plugin_interface::ReplicaEntryInfoVersions;
+    use jito_geyser_protos::solana::geyser::SlotEntryUpdate;
+
+    pub fn get_slot_and_index_from_replica_entry_info_versions(
+        entry: &ReplicaEntryInfoVersions,
+    ) -> SlotEntryUpdate {
+        match entry {
+            ReplicaEntryInfoVersions::V0_0_1(entry_info) => SlotEntryUpdate {
+                slot: entry_info.slot,
+                index: entry_info.index as u64,
+                executed_transaction_count: entry_info.executed_transaction_count,
+            },
+            ReplicaEntryInfoVersions::V0_0_2(entry_info) => SlotEntryUpdate {
+                slot: entry_info.slot,
+                index: entry_info.index as u64,
+                executed_transaction_count: entry_info.executed_transaction_count,
+            },
+        }
+    }
 }
 
 #[no_mangle]
@@ -521,5 +618,106 @@ impl Interceptor for AccessTokenChecker {
             Some(t) if &self.access_token == t => Ok(req),
             _ => Err(Status::unauthenticated("Access token is incorrect")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plugin_config_deserialization() {
+        let config_json = r#"
+        {
+            "libpath": "/path/to/container-output/libgeyser_grpc_plugin_server.so",
+            "bind_address": "0.0.0.0:10000",
+            "account_update_buffer_size": 100000,
+            "slot_update_buffer_size": 100000,
+            "slot_entry_update_buffer_size": 1000000,
+            "block_update_buffer_size": 100000,
+            "transaction_update_buffer_size": 100000,
+            "geyser_service_config": {
+                "heartbeat_interval_ms": 1000,
+                "subscriber_buffer_size": 1000000
+            }
+        }
+        "#;
+
+        let config: PluginConfig = serde_json::from_str(config_json).unwrap();
+
+        assert_eq!(config.bind_address, "0.0.0.0:10000");
+        assert_eq!(config.account_update_buffer_size, 100000);
+        assert_eq!(config.slot_update_buffer_size, 100000);
+        assert_eq!(config.slot_entry_update_buffer_size, 1000000);
+        assert_eq!(config.block_update_buffer_size, 100000);
+        assert_eq!(config.transaction_update_buffer_size, 100000);
+    }
+
+    // Please update the test when the default values are added
+    #[test]
+    fn test_plugin_config_missing_fields_error() {
+        let config_json = r#"
+        {
+            "bind_address": "0.0.0.0:10000",
+            "account_update_buffer_size": 100000,
+            "geyser_service_config": {
+                "heartbeat_interval_ms": 1000
+            }
+        }
+        "#;
+
+        let result: Result<PluginConfig, _> = serde_json::from_str(config_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_plugin_config_invalid_types() {
+        let config_json = r#"
+        {
+            "bind_address": "0.0.0.0:10000",
+            "account_update_buffer_size": "not a number",
+            "slot_update_buffer_size": 100000,
+            "block_update_buffer_size": 100000,
+            "transaction_update_buffer_size": 100000,
+            "geyser_service_config": {
+                "heartbeat_interval_ms": 1000,
+                "subscriber_buffer_size": 1000000
+            }
+        }
+        "#;
+
+        let result: Result<PluginConfig, _> = serde_json::from_str(config_json);
+        assert!(result.is_err());
+    }
+
+    // We currently have default value for slot_entry_update_buffer_size, so this test will always pass
+    #[test]
+    fn test_plugin_config_no_slot_entry_update_buffer_size() {
+        let config_json = r#"
+        {
+            "libpath": "/path/to/container-output/libgeyser_grpc_plugin_server.so",
+            "bind_address": "0.0.0.0:10000",
+            "account_update_buffer_size": 100000,
+            "slot_update_buffer_size": 100000,
+            "block_update_buffer_size": 100000,
+            "transaction_update_buffer_size": 100000,
+            "geyser_service_config": {
+                "heartbeat_interval_ms": 1000,
+                "subscriber_buffer_size": 1000000
+            }
+        }
+        "#;
+
+        let config: PluginConfig = serde_json::from_str(config_json).unwrap();
+
+        assert_eq!(config.bind_address, "0.0.0.0:10000");
+        assert_eq!(config.account_update_buffer_size, 100000);
+        assert_eq!(config.slot_update_buffer_size, 100000);
+        assert_eq!(
+            config.slot_entry_update_buffer_size,
+            PluginConfig::DEFAULT_SLOT_ENTRY_UPDATE_BUFFER_SIZE
+        );
+        assert_eq!(config.block_update_buffer_size, 100000);
+        assert_eq!(config.transaction_update_buffer_size, 100000);
     }
 }
