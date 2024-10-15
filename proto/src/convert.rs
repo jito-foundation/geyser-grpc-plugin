@@ -23,8 +23,10 @@ use solana_transaction_status::{
     TransactionWithStatusMeta, VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
 
-use crate::solana::{entries, tx_by_addr};
-use crate::{solana::storage::confirmed_block, StoredExtendedRewards, StoredTransactionStatusMeta};
+use crate::{
+    solana::{entries, storage::confirmed_block, tx_by_addr},
+    StoredExtendedRewards, StoredTransactionStatusMeta,
+};
 
 impl From<Vec<Reward>> for confirmed_block::Rewards {
     fn from(rewards: Vec<Reward>) -> Self {
