@@ -57,6 +57,7 @@ pub struct PluginData {
 
     is_startup_completed: AtomicBool,
     ignore_startup_updates: bool,
+    account_data_notifications_enabled: bool,
 }
 
 #[derive(Default)]
@@ -99,6 +100,7 @@ pub struct PluginConfig {
     pub block_update_buffer_size: usize,
     pub transaction_update_buffer_size: usize,
     pub skip_startup_stream: Option<bool>,
+    pub account_data_notifications_enabled: Option<bool>,
 }
 
 impl PluginConfig {
@@ -198,6 +200,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             is_startup_completed: AtomicBool::new(false),
             // don't skip startup to keep backwards compatability
             ignore_startup_updates: config.skip_startup_stream.unwrap_or(false),
+            account_data_notifications_enabled: config.account_data_notifications_enabled.unwrap_or(true),
         });
         info!("plugin data initialized");
 
@@ -519,7 +522,7 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn account_data_notifications_enabled(&self) -> bool {
-        true
+        self.data.as_ref().map(|d| d.account_data_notifications_enabled).unwrap_or(true)
     }
 
     fn transaction_notifications_enabled(&self) -> bool {
