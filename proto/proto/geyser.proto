@@ -157,6 +157,29 @@ message GetHeartbeatIntervalResponse {
   uint64 heartbeat_interval_ms = 1;
 }
 
+/// Modelled based off of https://github.com/solana-labs/solana/blob/v2.0/geyser-plugin-interface/src/geyser_plugin_interface.rs#L210
+/// If more details are needed can extend this structure.
+message SlotEntryUpdate {
+  // The slot number of the block containing this Entry
+  uint64 slot = 1;
+  // The Entry's index in the block
+  uint64 index = 2;
+  // The number of executed transactions in the Entry
+  // If this number is zero, we can assume its a tick entry
+  uint64 executed_transaction_count = 3;
+}
+
+message TimestampedSlotEntryUpdate {
+  // Time at which the message was generated
+  // Send relative timestamp in micros using u32 to reduce overhead. Provides ~71 mins of accuracy between sender and receiver
+  // See [compact_timestamp::to_system_time]
+  uint32 ts = 1;
+  // SlotEntryUpdate update
+  SlotEntryUpdate entry_update = 2;
+}
+
+message SubscribeSlotEntryUpdateRequest {}
+
 // The following __must__ be assumed:
 //    - Clients may receive data for slots out of order.
 //    - Clients may receive account updates for a given slot out of order.
@@ -186,4 +209,8 @@ service Geyser {
 
   // Subscribes to block updates.
   rpc SubscribeBlockUpdates(SubscribeBlockUpdatesRequest) returns (stream TimestampedBlockUpdate) {}
+
+  // Subscribes to entry updates.
+  // Returns the highest slot seen thus far and the entry index corresponding to the tick
+  rpc SubscribeSlotEntryUpdates(SubscribeSlotEntryUpdateRequest) returns (stream TimestampedSlotEntryUpdate) {}
 }

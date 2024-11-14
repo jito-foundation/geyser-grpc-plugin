@@ -21,6 +21,7 @@ prost-types = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
+serde_with = { workspace = true }
 solana-logger = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program = { workspace = true }
