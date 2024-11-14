@@ -55,6 +55,8 @@ pub struct PluginData {
     /// Highest slot that an account write has been processed for thus far.
     highest_write_slot: Arc<AtomicU64>,
 
+    /// Only set to true if account_data_notifications_enabled is true
+    /// Otherwise, will always be false
     is_startup_completed: AtomicBool,
     ignore_startup_updates: bool,
     account_data_notifications_enabled: bool,
@@ -219,6 +221,8 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         data.runtime.shutdown_background();
     }
 
+    /// Note: this is called only if account_data_notifications_enabled is set to true.
+    /// Do not use it for anything except for account updates
     fn notify_end_of_startup(&self) -> PluginResult<()> {
         self.data
             .as_ref()
@@ -345,10 +349,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
 
-        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
-            return Ok(());
-        }
-
         debug!("Updating slot {:?} at with status {:?}", slot, status);
 
         let status = match status {
@@ -385,10 +385,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
         slot: u64,
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
-
-        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
-            return Ok(());
-        }
 
         let transaction_update = match transaction {
             ReplicaTransactionInfoVersions::V0_0_1(tx) => TimestampedTransactionUpdate {
@@ -436,10 +432,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
     fn notify_block_metadata(&self, block_info: ReplicaBlockInfoVersions) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
-
-        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
-            return Ok(());
-        }
 
         let block = match block_info {
             ReplicaBlockInfoVersions::V0_0_1(block) => TimestampedBlockUpdate {
