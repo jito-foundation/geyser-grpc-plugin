@@ -200,7 +200,9 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             is_startup_completed: AtomicBool::new(false),
             // don't skip startup to keep backwards compatability
             ignore_startup_updates: config.skip_startup_stream.unwrap_or(false),
-            account_data_notifications_enabled: config.account_data_notifications_enabled.unwrap_or(true),
+            account_data_notifications_enabled: config
+                .account_data_notifications_enabled
+                .unwrap_or(true),
         });
         info!("plugin data initialized");
 
@@ -522,7 +524,10 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn account_data_notifications_enabled(&self) -> bool {
-        self.data.as_ref().map(|d| d.account_data_notifications_enabled).unwrap_or(true)
+        self.data
+            .as_ref()
+            .map(|d| d.account_data_notifications_enabled)
+            .unwrap_or(true)
     }
 
     fn transaction_notifications_enabled(&self) -> bool {
@@ -535,10 +540,6 @@ impl GeyserPlugin for GeyserGrpcPlugin {
 
     fn notify_entry(&self, entry: ReplicaEntryInfoVersions) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
-
-        if data.ignore_startup_updates && !data.is_startup_completed.load(Ordering::Relaxed) {
-            return Ok(());
-        }
 
         let slot_entry = utils::get_slot_and_index_from_replica_entry_info_versions(&entry);
 
