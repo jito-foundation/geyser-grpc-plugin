@@ -71,6 +71,10 @@ enum SlotUpdateStatus {
   CONFIRMED = 0;
   PROCESSED = 1;
   ROOTED = 2;
+  FirstShredReceived = 3;
+  Completed = 4;
+  CreatedBank = 5;
+  Dead = 6;
 }
 
 message SlotUpdate {

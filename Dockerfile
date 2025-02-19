@@ -1,4 +1,4 @@
-FROM rust:1.60-slim-bullseye
+FROM rust:1.79-slim-bullseye
 # keep rust version in sync to avoid re-downloading rust
 # use https://github.com/solana-labs/solana/blob/db9fdf5811ecd8a84ea446591854974d386681ef/ci/rust-version.sh#L21
 

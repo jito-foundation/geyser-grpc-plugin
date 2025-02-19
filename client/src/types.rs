@@ -8,6 +8,10 @@ pub enum SlotStatus {
     Rooted,
     Confirmed,
     Processed,
+    FirstShredReceived,
+    Completed,
+    CreatedBank,
+    Dead
 }
 
 pub(crate) trait AccountUpdateNotification {
@@ -108,6 +112,10 @@ pub enum SlotUpdateStatus {
     Confirmed,
     Processed,
     Rooted,
+    FirstShredReceived,
+    Completed,
+    CreatedBank,
+    Dead,
 }
 
 impl From<geyser::SlotUpdateStatus> for SlotUpdateStatus {
@@ -116,6 +124,11 @@ impl From<geyser::SlotUpdateStatus> for SlotUpdateStatus {
             geyser::SlotUpdateStatus::Confirmed => Self::Confirmed,
             geyser::SlotUpdateStatus::Processed => Self::Processed,
             geyser::SlotUpdateStatus::Rooted => Self::Rooted,
+            geyser::SlotUpdateStatus::FirstShredReceived => SlotUpdateStatus::FirstShredReceived,
+            geyser::SlotUpdateStatus::Completed => SlotUpdateStatus::Completed,
+            geyser::SlotUpdateStatus::CreatedBank => SlotUpdateStatus::CreatedBank,
+            geyser::SlotUpdateStatus::Dead => SlotUpdateStatus::Dead,
+
         }
     }
 }
