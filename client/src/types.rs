@@ -11,7 +11,7 @@ pub enum SlotStatus {
     FirstShredReceived,
     Completed,
     CreatedBank,
-    Dead
+    Dead,
 }
 
 pub(crate) trait AccountUpdateNotification {
@@ -128,7 +128,6 @@ impl From<geyser::SlotUpdateStatus> for SlotUpdateStatus {
             geyser::SlotUpdateStatus::Completed => SlotUpdateStatus::Completed,
             geyser::SlotUpdateStatus::CreatedBank => SlotUpdateStatus::CreatedBank,
             geyser::SlotUpdateStatus::Dead => SlotUpdateStatus::Dead,
-
         }
     }
 }

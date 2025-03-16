@@ -2,12 +2,6 @@ pub mod geyser_consumer;
 pub mod interceptor;
 pub mod types;
 
-#[cfg(not(feature = "jito-solana"))]
-extern crate solana_sdk;
-
-#[cfg(feature = "jito-solana")]
-extern crate jito_solana_sdk as solana_sdk;
-
 use std::{
     str::FromStr,
     sync::{atomic::AtomicBool, Arc},
