@@ -4,9 +4,8 @@ use std::{
 };
 
 use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
-use solana_sdk::hash::HASH_BYTES;
 use solana_sdk::{
-    hash::Hash,
+    hash::{Hash, HASH_BYTES},
     instruction::{CompiledInstruction, InstructionError},
     message::{
         legacy::Message as LegacyMessage,
@@ -1253,7 +1252,9 @@ impl From<entries::Entry> for EntrySummary {
 
 #[cfg(test)]
 mod test {
-    use {super::*, enum_iterator::all};
+    use enum_iterator::all;
+
+    use super::*;
 
     #[test]
     fn test_reward_type_encode() {
