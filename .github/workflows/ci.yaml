@@ -105,6 +105,7 @@ jobs:
         run: cargo sort --workspace --check
       - name: run clippy
         run: cargo clippy --all-features -- -D clippy::all
+      - run: cargo fmt --all --check
 
   build:
     name: build

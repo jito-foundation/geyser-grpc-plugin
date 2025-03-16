@@ -202,7 +202,9 @@ impl GeyserPlugin for GeyserGrpcPlugin {
             is_startup_completed: AtomicBool::new(false),
             // don't skip startup to keep backwards compatability
             ignore_startup_updates: config.skip_startup_stream.unwrap_or(false),
-            account_data_notifications_enabled: config.account_data_notifications_enabled.unwrap_or(true),
+            account_data_notifications_enabled: config
+                .account_data_notifications_enabled
+                .unwrap_or(true),
         });
         info!("plugin data initialized");
 
@@ -518,7 +520,10 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     }
 
     fn account_data_notifications_enabled(&self) -> bool {
-        self.data.as_ref().map(|d| d.account_data_notifications_enabled).unwrap_or(true)
+        self.data
+            .as_ref()
+            .map(|d| d.account_data_notifications_enabled)
+            .unwrap_or(true)
     }
 
     fn transaction_notifications_enabled(&self) -> bool {

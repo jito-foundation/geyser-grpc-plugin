@@ -4,6 +4,7 @@ use std::{
 };
 
 use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
+use solana_sdk::hash::HASH_BYTES;
 use solana_sdk::{
     hash::Hash,
     instruction::{CompiledInstruction, InstructionError},
@@ -17,7 +18,6 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError, VersionedTransaction},
     transaction_context::TransactionReturnData,
 };
-use solana_sdk::hash::HASH_BYTES;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
     RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
@@ -156,7 +156,8 @@ impl From<VersionedConfirmedBlock> for confirmed_block::ConfirmedBlock {
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
             num_partitions: num_partitions.map(Into::into),
             block_time: block_time.map(|timestamp| confirmed_block::UnixTimestamp { timestamp }),
-            block_height: block_height.map(|block_height| confirmed_block::BlockHeight { block_height }),
+            block_height: block_height
+                .map(|block_height| confirmed_block::BlockHeight { block_height }),
         }
     }
 }
@@ -189,7 +190,8 @@ impl TryFrom<confirmed_block::ConfirmedBlock> for ConfirmedBlock {
             num_partitions: num_partitions
                 .map(|confirmed_block::NumPartitions { num_partitions }| num_partitions),
             block_time: block_time.map(|confirmed_block::UnixTimestamp { timestamp }| timestamp),
-            block_height: block_height.map(|confirmed_block::BlockHeight { block_height }| block_height),
+            block_height: block_height
+                .map(|confirmed_block::BlockHeight { block_height }| block_height),
         })
     }
 }
@@ -217,7 +219,9 @@ impl From<VersionedTransactionWithStatusMeta> for confirmed_block::ConfirmedTran
 
 impl TryFrom<confirmed_block::ConfirmedTransaction> for TransactionWithStatusMeta {
     type Error = bincode::Error;
-    fn try_from(value: confirmed_block::ConfirmedTransaction) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: confirmed_block::ConfirmedTransaction,
+    ) -> std::result::Result<Self, Self::Error> {
         let meta = value.meta.map(|meta| meta.try_into()).transpose()?;
         let transaction = value.transaction.expect("transaction is required").into();
         Ok(match meta {
@@ -466,7 +470,9 @@ impl From<StoredTransactionStatusMeta> for confirmed_block::TransactionStatusMet
 impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
     type Error = bincode::Error;
 
-    fn try_from(value: confirmed_block::TransactionStatusMeta) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: confirmed_block::TransactionStatusMeta,
+    ) -> std::result::Result<Self, Self::Error> {
         let confirmed_block::TransactionStatusMeta {
             err,
             fee,
