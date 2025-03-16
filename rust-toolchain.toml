@@ -1,3 +1,2 @@
 [toolchain]
-channel = "1.79.0"
-components = [ "rustfmt", "rustc-dev", "clippy", "cargo" ]
+channel = "1.81.0"
