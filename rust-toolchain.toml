@@ -1,3 +1,2 @@
 [toolchain]
 channel = "1.81.0"
-components = [ "rustfmt", "rustc-dev", "clippy", "cargo" ]
