@@ -17,6 +17,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError, VersionedTransaction},
     transaction_context::TransactionReturnData,
 };
+use solana_sdk::hash::HASH_BYTES;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
     RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
@@ -155,8 +156,7 @@ impl From<VersionedConfirmedBlock> for confirmed_block::ConfirmedBlock {
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
             num_partitions: num_partitions.map(Into::into),
             block_time: block_time.map(|timestamp| confirmed_block::UnixTimestamp { timestamp }),
-            block_height: block_height
-                .map(|block_height| confirmed_block::BlockHeight { block_height }),
+            block_height: block_height.map(|block_height| confirmed_block::BlockHeight { block_height }),
         }
     }
 }
@@ -189,8 +189,7 @@ impl TryFrom<confirmed_block::ConfirmedBlock> for ConfirmedBlock {
             num_partitions: num_partitions
                 .map(|confirmed_block::NumPartitions { num_partitions }| num_partitions),
             block_time: block_time.map(|confirmed_block::UnixTimestamp { timestamp }| timestamp),
-            block_height: block_height
-                .map(|confirmed_block::BlockHeight { block_height }| block_height),
+            block_height: block_height.map(|confirmed_block::BlockHeight { block_height }| block_height),
         })
     }
 }
@@ -218,9 +217,7 @@ impl From<VersionedTransactionWithStatusMeta> for confirmed_block::ConfirmedTran
 
 impl TryFrom<confirmed_block::ConfirmedTransaction> for TransactionWithStatusMeta {
     type Error = bincode::Error;
-    fn try_from(
-        value: confirmed_block::ConfirmedTransaction,
-    ) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: confirmed_block::ConfirmedTransaction) -> std::result::Result<Self, Self::Error> {
         let meta = value.meta.map(|meta| meta.try_into()).transpose()?;
         let transaction = value.transaction.expect("transaction is required").into();
         Ok(match meta {
@@ -331,7 +328,9 @@ impl From<confirmed_block::Message> for VersionedMessage {
             .into_iter()
             .map(|key| Pubkey::try_from(key).unwrap())
             .collect();
-        let recent_blockhash = Hash::new(&value.recent_blockhash);
+        let recent_blockhash = <[u8; HASH_BYTES]>::try_from(value.recent_blockhash)
+            .map(Hash::new_from_array)
+            .unwrap();
         let instructions = value.instructions.into_iter().map(|ix| ix.into()).collect();
         let address_table_lookups = value
             .address_table_lookups
@@ -467,9 +466,7 @@ impl From<StoredTransactionStatusMeta> for confirmed_block::TransactionStatusMet
 impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
     type Error = bincode::Error;
 
-    fn try_from(
-        value: confirmed_block::TransactionStatusMeta,
-    ) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: confirmed_block::TransactionStatusMeta) -> std::result::Result<Self, Self::Error> {
         let confirmed_block::TransactionStatusMeta {
             err,
             fee,
@@ -840,6 +837,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             34 => TransactionError::ResanitizationNeeded,
             36 => TransactionError::UnbalancedTransaction,
             37 => TransactionError::ProgramCacheHitMaxLimit,
+            38 => TransactionError::CommitCancelled,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -960,6 +958,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 }
                 TransactionError::ProgramCacheHitMaxLimit => {
                     tx_by_addr::TransactionErrorType::ProgramCacheHitMaxLimit
+                }
+                TransactionError::CommitCancelled => {
+                    tx_by_addr::TransactionErrorType::CommitCancelled
                 }
             } as i32,
             instruction_error: match transaction_error {
@@ -1235,7 +1236,9 @@ impl From<entries::Entry> for EntrySummary {
     fn from(entry: entries::Entry) -> Self {
         EntrySummary {
             num_hashes: entry.num_hashes,
-            hash: Hash::new(&entry.hash),
+            hash: <[u8; HASH_BYTES]>::try_from(entry.hash)
+                .map(Hash::new_from_array)
+                .unwrap(),
             num_transactions: entry.num_transactions,
             starting_transaction_index: entry.starting_transaction_index as usize,
         }
@@ -1244,9 +1247,7 @@ impl From<entries::Entry> for EntrySummary {
 
 #[cfg(test)]
 mod test {
-    use enum_iterator::all;
-
-    use super::*;
+    use {super::*, enum_iterator::all};
 
     #[test]
     fn test_reward_type_encode() {
