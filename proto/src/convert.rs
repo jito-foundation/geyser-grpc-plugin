@@ -5,7 +5,7 @@ use std::{
 
 use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
 use solana_sdk::{
-    hash::Hash,
+    hash::{Hash, HASH_BYTES},
     instruction::{CompiledInstruction, InstructionError},
     message::{
         legacy::Message as LegacyMessage,
@@ -331,7 +331,9 @@ impl From<confirmed_block::Message> for VersionedMessage {
             .into_iter()
             .map(|key| Pubkey::try_from(key).unwrap())
             .collect();
-        let recent_blockhash = Hash::new(&value.recent_blockhash);
+        let recent_blockhash = <[u8; HASH_BYTES]>::try_from(value.recent_blockhash)
+            .map(Hash::new_from_array)
+            .unwrap();
         let instructions = value.instructions.into_iter().map(|ix| ix.into()).collect();
         let address_table_lookups = value
             .address_table_lookups
@@ -840,6 +842,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             34 => TransactionError::ResanitizationNeeded,
             36 => TransactionError::UnbalancedTransaction,
             37 => TransactionError::ProgramCacheHitMaxLimit,
+            38 => TransactionError::CommitCancelled,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -960,6 +963,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 }
                 TransactionError::ProgramCacheHitMaxLimit => {
                     tx_by_addr::TransactionErrorType::ProgramCacheHitMaxLimit
+                }
+                TransactionError::CommitCancelled => {
+                    tx_by_addr::TransactionErrorType::CommitCancelled
                 }
             } as i32,
             instruction_error: match transaction_error {
@@ -1235,7 +1241,9 @@ impl From<entries::Entry> for EntrySummary {
     fn from(entry: entries::Entry) -> Self {
         EntrySummary {
             num_hashes: entry.num_hashes,
-            hash: Hash::new(&entry.hash),
+            hash: <[u8; HASH_BYTES]>::try_from(entry.hash)
+                .map(Hash::new_from_array)
+                .unwrap(),
             num_transactions: entry.num_transactions,
             starting_transaction_index: entry.starting_transaction_index as usize,
         }

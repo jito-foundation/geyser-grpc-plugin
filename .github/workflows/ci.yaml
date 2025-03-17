@@ -13,6 +13,26 @@ on:
       - 'v*.*'
 
 jobs:
+  security_audit:
+    name: security_audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install cargo-audit from crates.io
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-audit
+      - name: Run cargo audit
+        run: |
+          cargo audit \
+            --ignore RUSTSEC-2022-0093 \
+            --ignore RUSTSEC-2024-0421 \
+            --ignore RUSTSEC-2024-0344 \
+            --ignore RUSTSEC-2024-0376 \
+            --ignore RUSTSEC-2025-0009
+
   lint:
     name: lint
     runs-on: ubuntu-latest
@@ -30,6 +50,7 @@ jobs:
         run: cargo sort --workspace --check
       - name: run clippy
         run: cargo clippy --all-features -- -D clippy::all
+      - run: cargo fmt --all --check
 
   build:
     name: build

@@ -16,7 +16,7 @@ fn main() {
             "InstructionErrorType",
             "#[cfg_attr(test, derive(enum_iterator::Sequence))]",
         )
-        .compile(
+        .compile_protos(
             &[
                 "proto/confirmed_block.proto",
                 "proto/entries.proto",

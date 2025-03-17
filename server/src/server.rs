@@ -786,7 +786,7 @@ impl GeyserService {
             .iter()
             .filter_map(|(uuid, sub)| {
                 if matches!(
-                    sub.subscription_tx.try_send(Ok(slot_update.clone())),
+                    sub.subscription_tx.try_send(Ok(slot_update)),
                     Err(TokioTrySendError::Closed(_))
                 ) {
                     Some(*uuid)
@@ -810,7 +810,7 @@ impl GeyserService {
             .iter()
             .filter_map(|(uuid, sub)| {
                 if matches!(
-                    sub.subscription_tx.try_send(Ok(slot_entry_update.clone())),
+                    sub.subscription_tx.try_send(Ok(slot_entry_update)),
                     Err(TokioTrySendError::Closed(_))
                 ) {
                     Some(*uuid)

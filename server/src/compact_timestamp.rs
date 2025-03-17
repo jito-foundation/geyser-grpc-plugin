@@ -1,7 +1,6 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// A compact timestamp representation for microseconds using u32 to reduce overhead. Provides ~71 mins of accuracy
-
 pub fn get_current_time_us_u32() -> u32 {
     from_system_time(SystemTime::now())
 }
