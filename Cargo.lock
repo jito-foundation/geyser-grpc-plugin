@@ -1421,7 +1421,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-plugin-client"
-version = "2.0.15"
+version = "2.2.0"
 dependencies = [
  "jito-geyser-protos",
  "log",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-plugin-server"
-version = "2.0.15"
+version = "2.2.0"
 dependencies = [
  "agave-geyser-plugin-interface",
  "bs58",
@@ -1898,7 +1898,7 @@ checksum = "453ad9f582a441959e5f0d088b02ce04cfe8d51a8eaf077f12ac6d3e94164ca6"
 
 [[package]]
 name = "jito-geyser-cli"
-version = "2.0.15"
+version = "2.2.0"
 dependencies = [
  "clap",
  "futures-util",
@@ -1913,7 +1913,7 @@ dependencies = [
 
 [[package]]
 name = "jito-geyser-protos"
-version = "2.0.15"
+version = "2.2.0"
 dependencies = [
  "bincode",
  "bs58",
