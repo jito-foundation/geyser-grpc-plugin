@@ -67,10 +67,14 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     let args: Args = Args::parse();
-    println!("args: {args:?}");
+    println!("Started with args: {args:?}");
 
-    let endpoint = Endpoint::from_str(&args.url).unwrap();
-
+    let mut endpoint = Endpoint::from_str(&args.url).unwrap();
+    if args.url.starts_with("https") {
+        endpoint = endpoint
+            .tls_config(tonic::transport::ClientTlsConfig::new().with_enabled_roots())
+            .unwrap();
+    }
     let channel = endpoint.connect().await.expect("connects");
 
     let interceptor = GrpcInterceptor {
