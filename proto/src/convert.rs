@@ -1905,7 +1905,6 @@ mod test {
                         }),
                     };
                     let transaction_error: TransactionError = tx_by_addr_error
-                        .clone()
                         .try_into()
                         .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());
@@ -1923,7 +1922,6 @@ mod test {
                                 transaction_details: None,
                             };
                             let transaction_error: TransactionError = tx_by_addr_error
-                                .clone()
                                 .try_into()
                                 .unwrap_or_else(|_| panic!("{ix_error:?} conversion implemented?"));
                             assert_eq!(tx_by_addr_error, transaction_error.into());
@@ -1940,7 +1938,7 @@ mod test {
                                 transaction_details: None,
                             };
                             let transaction_error: TransactionError =
-                                tx_by_addr_error.clone().try_into().unwrap();
+                                tx_by_addr_error.try_into().unwrap();
                             assert_eq!(tx_by_addr_error, transaction_error.into());
                         }
                     }
@@ -1952,7 +1950,6 @@ mod test {
                         transaction_details: None,
                     };
                     let transaction_error: TransactionError = tx_by_addr_error
-                        .clone()
                         .try_into()
                         .unwrap_or_else(|_| panic!("{error:?} conversion implemented?"));
                     assert_eq!(tx_by_addr_error, transaction_error.into());
