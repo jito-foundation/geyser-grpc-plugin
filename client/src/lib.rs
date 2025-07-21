@@ -8,7 +8,6 @@ use std::{
 };
 
 use jito_geyser_protos::solana::geyser::geyser_client::GeyserClient;
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use tonic::transport::{ClientTlsConfig, Endpoint};
 
 use crate::{geyser_consumer::GeyserConsumer, interceptor::GrpcInterceptor};

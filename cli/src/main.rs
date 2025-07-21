@@ -13,7 +13,7 @@ use jito_geyser_protos::solana::geyser::{
     SubscribeTransactionUpdatesRequest, TimestampedAccountUpdate,
 };
 use prost_types::Timestamp;
-use solana_sdk::pubkey::Pubkey;
+use solana_pubkey::Pubkey;
 use tonic::{transport::channel::Endpoint, Streaming};
 use uuid::Uuid;
 

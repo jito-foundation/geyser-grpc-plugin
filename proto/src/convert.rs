@@ -1,26 +1,27 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    str::FromStr,
-};
-
-use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
-use solana_sdk::{
-    hash::{Hash, HASH_BYTES},
-    instruction::{CompiledInstruction, InstructionError},
-    message::{
+use {
+    std::{
+        convert::{TryFrom, TryInto},
+        str::FromStr,
+    },
+    solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount},
+    solana_hash::{Hash, HASH_BYTES},
+    solana_instruction::error::InstructionError,
+    solana_message::{
+        compiled_instruction::CompiledInstruction,
         legacy::Message as LegacyMessage,
         v0::{self, LoadedAddresses, MessageAddressTableLookup},
         MessageHeader, VersionedMessage,
     },
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Transaction, TransactionError, VersionedTransaction},
-    transaction_context::TransactionReturnData,
-};
-use solana_transaction_status::{
-    ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
-    RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
-    TransactionWithStatusMeta, VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    solana_pubkey::Pubkey,
+    solana_signature::Signature,
+    solana_transaction::{Transaction, versioned::VersionedTransaction},
+    solana_transaction_context::TransactionReturnData,
+    solana_transaction_error::TransactionError,
+    solana_transaction_status::{
+        ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
+        RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
+        TransactionWithStatusMeta, VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    },
 };
 
 use crate::{
@@ -395,6 +396,7 @@ impl From<TransactionStatusMeta> for confirmed_block::TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
         } = value;
         let err = match status {
             Ok(()) => None,
@@ -455,6 +457,7 @@ impl From<TransactionStatusMeta> for confirmed_block::TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         }
     }
 }
@@ -489,6 +492,7 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         } = value;
         let status = match &err {
             None => Ok(()),
@@ -558,6 +562,7 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
         })
     }
 }
