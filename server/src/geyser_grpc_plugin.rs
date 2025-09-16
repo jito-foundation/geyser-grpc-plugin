@@ -417,6 +417,19 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     }),
                 }),
             },
+            ReplicaTransactionInfoVersions::V0_0_3(tx) => TimestampedTransactionUpdate {
+                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+                transaction: Some(TransactionUpdate {
+                    slot,
+                    signature: tx.signature.to_string(),
+                    is_vote: tx.is_vote,
+                    tx_idx: tx.index as u64,
+                    tx: Some(ConfirmedTransaction {
+                        transaction: Some(tx.transaction.clone().into()),
+                        meta: Some(tx.transaction_status_meta.clone().into()),
+                    }),
+                }),
+            },
         };
 
         match data.transaction_update_sender.try_send(transaction_update) {

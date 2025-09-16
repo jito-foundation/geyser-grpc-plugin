@@ -53,7 +53,7 @@ solana-transaction = "3.0"
 solana-transaction-context = "3.0"
 solana-transaction-error = "3.0"
 solana-transaction-status = "3.0"
-solana-vote-program = "3.0"
+solana-vote-interface = "3.0"
 thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["rt-multi-thread"] }
 tokio-stream = "0.1"
