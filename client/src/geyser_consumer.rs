@@ -24,6 +24,8 @@ use jito_geyser_protos::solana::geyser::{
 };
 use log::*;
 use lru::LruCache;
+use solana_clock::Slot;
+use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tokio::{
     sync::mpsc::UnboundedSender,
@@ -36,7 +38,7 @@ use crate::{
     types::{
         AccountUpdate, AccountUpdateNotification, PartialAccountUpdate, SlotEntryUpdate, SlotUpdate,
     },
-    GrpcInterceptor, Pubkey, Slot,
+    GrpcInterceptor,
 };
 
 #[derive(Error, Debug)]

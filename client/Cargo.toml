@@ -9,7 +9,9 @@ edition = { workspace = true }
 jito-geyser-protos = { workspace = true }
 log = { workspace = true }
 lru = { workspace = true }
-solana-sdk = { workspace = true }
+solana-clock = {workspace = true }
+solana-pubkey = {workspace = true }
+solana-slot-hashes = {workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }

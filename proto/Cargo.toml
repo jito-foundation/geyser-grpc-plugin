@@ -12,7 +12,15 @@ prost = { workspace = true }
 prost-types = { workspace = true }
 serde = { workspace = true }
 solana-account-decoder = { workspace = true }
-solana-sdk = { workspace = true }
+solana-hash = { workspace = true }
+solana-instruction = {workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-serde = { workspace = true }
+solana-signature = { workspace = true }
+solana-transaction = { workspace = true }
+solana-transaction-context = { workspace = true }
+solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
 tonic = { workspace = true }
 

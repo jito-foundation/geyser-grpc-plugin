@@ -1,26 +1,28 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    str::FromStr,
-};
-
-use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
-use solana_sdk::{
-    hash::{Hash, HASH_BYTES},
-    instruction::{CompiledInstruction, InstructionError},
-    message::{
+use {
+    solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount},
+    solana_hash::{Hash, HASH_BYTES},
+    solana_instruction::error::InstructionError,
+    solana_message::{
+        compiled_instruction::CompiledInstruction,
         legacy::Message as LegacyMessage,
         v0::{self, LoadedAddresses, MessageAddressTableLookup},
         MessageHeader, VersionedMessage,
     },
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Transaction, TransactionError, VersionedTransaction},
-    transaction_context::TransactionReturnData,
-};
-use solana_transaction_status::{
-    ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
-    RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta, TransactionTokenBalance,
-    TransactionWithStatusMeta, VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+    solana_pubkey::Pubkey,
+    solana_signature::Signature,
+    solana_transaction::{versioned::VersionedTransaction, Transaction},
+    solana_transaction_context::TransactionReturnData,
+    solana_transaction_error::TransactionError,
+    solana_transaction_status::{
+        ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
+        RewardsAndNumPartitions, TransactionByAddrInfo, TransactionStatusMeta,
+        TransactionTokenBalance, TransactionWithStatusMeta, VersionedConfirmedBlock,
+        VersionedTransactionWithStatusMeta,
+    },
+    std::{
+        convert::{TryFrom, TryInto},
+        str::FromStr,
+    },
 };
 
 use crate::{
@@ -395,6 +397,7 @@ impl From<TransactionStatusMeta> for confirmed_block::TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
         } = value;
         let err = match status {
             Ok(()) => None,
@@ -455,6 +458,7 @@ impl From<TransactionStatusMeta> for confirmed_block::TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         }
     }
 }
@@ -489,6 +493,7 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         } = value;
         let status = match &err {
             None => Ok(()),
@@ -558,6 +563,7 @@ impl TryFrom<confirmed_block::TransactionStatusMeta> for TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
         })
     }
 }
@@ -741,6 +747,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                     16 => InstructionError::DuplicateAccountIndex,
                     17 => InstructionError::ExecutableModified,
                     18 => InstructionError::RentEpochModified,
+                    #[allow(deprecated)]
                     19 => InstructionError::NotEnoughAccountKeys,
                     20 => InstructionError::AccountDataSizeChanged,
                     21 => InstructionError::AccountNotExecutable,
@@ -765,7 +772,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                     41 => InstructionError::ProgramFailedToCompile,
                     42 => InstructionError::Immutable,
                     43 => InstructionError::IncorrectAuthority,
-                    44 => InstructionError::BorshIoError(String::new()),
+                    44 => InstructionError::BorshIoError,
                     45 => InstructionError::AccountNotRentExempt,
                     46 => InstructionError::InvalidAccountOwner,
                     47 => InstructionError::ArithmeticOverflow,
@@ -1030,6 +1037,7 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::RentEpochModified => {
                                 tx_by_addr::InstructionErrorType::RentEpochModified
                             }
+                            #[allow(deprecated)]
                             InstructionError::NotEnoughAccountKeys => {
                                 tx_by_addr::InstructionErrorType::NotEnoughAccountKeys
                             }
@@ -1103,7 +1111,7 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::IncorrectAuthority => {
                                 tx_by_addr::InstructionErrorType::IncorrectAuthority
                             }
-                            InstructionError::BorshIoError(_) => {
+                            InstructionError::BorshIoError => {
                                 tx_by_addr::InstructionErrorType::BorshIoError
                             }
                             InstructionError::AccountNotRentExempt => {
@@ -1744,6 +1752,7 @@ mod test {
             tx_by_addr_transaction_error.try_into().unwrap()
         );
 
+        #[allow(deprecated)]
         let transaction_error =
             TransactionError::InstructionError(10, InstructionError::NotEnoughAccountKeys);
         let tx_by_addr_transaction_error: tx_by_addr::TransactionError =

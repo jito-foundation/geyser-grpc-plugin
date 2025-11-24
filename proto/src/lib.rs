@@ -1,17 +1,18 @@
 #[allow(clippy::all)]
-use std::str::FromStr;
-
-use serde::{Deserialize, Serialize};
-use solana_account_decoder::{
-    parse_token::{real_number_string_trimmed, UiTokenAmount},
-    StringAmount,
-};
-use solana_sdk::{
-    deserialize_utils::default_on_eof, message::v0::LoadedAddresses, transaction::Result,
-    transaction_context::TransactionReturnData,
-};
-use solana_transaction_status::{
-    InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
+use {
+    serde::{Deserialize, Serialize},
+    solana_account_decoder::{
+        parse_token::{real_number_string_trimmed, UiTokenAmount},
+        StringAmount,
+    },
+    solana_message::v0::LoadedAddresses,
+    solana_serde::default_on_eof,
+    solana_transaction_error::TransactionResult as Result,
+    solana_transaction_context::TransactionReturnData,
+    solana_transaction_status::{
+        InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
+    },
+    std::str::FromStr,
 };
 
 pub mod convert;
@@ -195,6 +196,8 @@ pub struct StoredTransactionStatusMeta {
     pub return_data: Option<TransactionReturnData>,
     #[serde(deserialize_with = "default_on_eof")]
     pub compute_units_consumed: Option<u64>,
+    #[serde(deserialize_with = "default_on_eof")]
+    pub cost_units: Option<u64>,
 }
 
 impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
@@ -211,6 +214,7 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
             rewards,
             return_data,
             compute_units_consumed,
+            cost_units,
         } = value;
         Self {
             status,
@@ -228,6 +232,7 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
             loaded_addresses: LoadedAddresses::default(),
             return_data,
             compute_units_consumed,
+            cost_units,
         }
     }
 }
@@ -248,6 +253,7 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
+            cost_units,
         } = value;
 
         if !loaded_addresses.is_empty() {
@@ -273,6 +279,7 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
                 .map(|rewards| rewards.into_iter().map(|reward| reward.into()).collect()),
             return_data,
             compute_units_consumed,
+            cost_units,
         })
     }
 }

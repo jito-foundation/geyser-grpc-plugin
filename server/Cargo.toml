@@ -25,9 +25,8 @@ serde_with = { workspace = true }
 solana-logger = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program = { workspace = true }
-solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
-solana-vote-program = { workspace = true }
+solana-vote-interface = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
