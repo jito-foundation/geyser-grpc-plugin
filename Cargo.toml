@@ -1,10 +1,5 @@
 [workspace]
-members = [
-    "cli",
-    "client",
-    "proto",
-    "server"
-]
+members = ["cli", "client", "proto", "server"]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"

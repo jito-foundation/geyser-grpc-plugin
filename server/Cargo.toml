@@ -5,6 +5,9 @@ license = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 
@@ -35,6 +38,3 @@ uuid = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }
-
-[package.metadata.docs.rs]
-targets = ["x86_64-unknown-linux-gnu"]
