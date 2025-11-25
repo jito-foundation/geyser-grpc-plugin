@@ -11,7 +11,7 @@ futures-util = { workspace = true }
 geyser-grpc-plugin-client = { workspace = true }
 jito-geyser-protos = { workspace = true }
 prost-types = { workspace = true }
-solana-sdk = { workspace = true }
+solana-pubkey = { workspace = true }
 tokio = { workspace = true }
 tonic = { workspace = true }
 uuid = { workspace = true }

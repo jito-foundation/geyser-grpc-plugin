@@ -1,16 +1,11 @@
 [workspace]
-members = [
-    "cli",
-    "client",
-    "proto",
-    "server"
-]
+members = ["cli", "client", "proto", "server"]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"
 
 [workspace.package]
-version = "2.0.15"
+version = "3.1.0"
 license = "Apache-2.0"
 authors = ["Jito Foundation <team@jito.network>"]
 edition = "2021"
@@ -18,15 +13,15 @@ repository = "https://github.com/jito-foundation/geyser-grpc-plugin"
 homepage = "https://jito.network/"
 
 [workspace.dependencies]
-agave-geyser-plugin-interface = "=2.2"
+agave-geyser-plugin-interface = "=3.1"
 bincode = "1.3.3"
 bs58 = "0.5.0"
 clap = { version = "4.4.6", features = ["derive", "env"] }
 crossbeam-channel = "0.5.8"
 enum-iterator = "2.1.0"
 futures-util = "0.3.28"
-geyser-grpc-plugin-client = { path = "client", version = "=2.0.15" }
-jito-geyser-protos = { path = "proto", version = "=2.0.15" }
+geyser-grpc-plugin-client = { path = "client", version = "=3.1.0" }
+jito-geyser-protos = { path = "proto", version = "=3.1.0" }
 log = "0.4.17"
 lru = "0.13.0"
 once_cell = "1.17.1"
@@ -37,13 +32,24 @@ serde = "1.0.160"
 serde_derive = "1.0.160"
 serde_json = "1.0.96"
 serde_with = "=3.12.0"
-solana-account-decoder = "=2.2"
-solana-logger = "=2.2"
-solana-metrics = "=2.2"
-solana-program = "=2.2"
-solana-sdk = "=2.2"
-solana-transaction-status = "=2.2"
-solana-vote-program = "=2.2"
+solana-account-decoder = "3.1"
+solana-address = "3.1"
+solana-clock = "3.0"
+solana-hash = "3.1"
+solana-instruction = "3.1"
+solana-logger = "3.0"
+solana-message = "3.0"
+solana-metrics = "3.1"
+solana-program = "3.0"
+solana-pubkey = "3.0"
+solana-serde = "3.0"
+solana-signature = "3.1"
+solana-slot-hashes = "3.0"
+solana-transaction = "3.0"
+solana-transaction-context = "3.1"
+solana-transaction-error = "3.0"
+solana-transaction-status = "3.1"
+solana-vote-interface = "3.0"
 thiserror = "2.0.12"
 tokio = { version = "1.44.1", features = ["rt-multi-thread"] }
 tokio-stream = "0.1"

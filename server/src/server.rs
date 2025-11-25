@@ -93,7 +93,7 @@ impl AccountUpdateStreamer<PartialAccountUpdate> for PartialAccountUpdateSubscri
         if self.skip_votes
             && update.owner
                 == *VOTE_PROGRAM_ID
-                    .get_or_init(|| solana_program::vote::program::id().to_bytes().to_vec())
+                    .get_or_init(|| solana_vote_interface::program::id().to_bytes().to_vec())
         {
             return Ok(());
         }
