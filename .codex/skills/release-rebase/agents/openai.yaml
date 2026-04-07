@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Rebase"
+  short_description: "Rebase plugin to a target release branch"
+  default_prompt: "Use $release-rebase to move this repo to a target jito-solana release branch."
