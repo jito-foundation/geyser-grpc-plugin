@@ -213,7 +213,7 @@ fn calc_skew(ts: &Timestamp) -> f64 {
     let packet_ts = Duration::new(ts.seconds as u64, ts.nanos as u32);
     now.checked_sub(packet_ts)
         .map(|d| d.as_secs_f64())
-        .unwrap_or_else(|| packet_ts.checked_sub(now).unwrap().as_secs_f64() * -1.0)
+        .unwrap_or_else(|| -packet_ts.checked_sub(now).unwrap().as_secs_f64())
 }
 
 async fn print_account_updates(mut response: Streaming<TimestampedAccountUpdate>) {
