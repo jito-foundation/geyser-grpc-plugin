@@ -7,7 +7,7 @@ use {
     },
     solana_message::v0::LoadedAddresses,
     solana_serde::default_on_eof,
-    solana_transaction_context::TransactionReturnData,
+    solana_transaction_context::transaction::TransactionReturnData,
     solana_transaction_error::TransactionResult as Result,
     solana_transaction_status::{
         InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
@@ -46,6 +46,8 @@ pub struct StoredExtendedReward {
     reward_type: Option<RewardType>,
     #[serde(deserialize_with = "default_on_eof")]
     commission: Option<u8>,
+    #[serde(deserialize_with = "default_on_eof")]
+    commission_bps: Option<u16>,
 }
 
 impl From<StoredExtendedReward> for Reward {
@@ -56,6 +58,7 @@ impl From<StoredExtendedReward> for Reward {
             post_balance,
             reward_type,
             commission,
+            commission_bps,
         } = value;
         Self {
             pubkey,
@@ -63,6 +66,7 @@ impl From<StoredExtendedReward> for Reward {
             post_balance,
             reward_type,
             commission,
+            commission_bps,
         }
     }
 }
@@ -75,6 +79,7 @@ impl From<Reward> for StoredExtendedReward {
             post_balance,
             reward_type,
             commission,
+            commission_bps,
         } = value;
         Self {
             pubkey,
@@ -82,6 +87,7 @@ impl From<Reward> for StoredExtendedReward {
             post_balance,
             reward_type,
             commission,
+            commission_bps,
         }
     }
 }
