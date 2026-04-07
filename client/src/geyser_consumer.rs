@@ -47,7 +47,7 @@ pub enum GeyserConsumerError {
     ConsumerChannelDisconnected,
 
     #[error("GrpcError {0}")]
-    GrpcError(#[from] Status),
+    GrpcError(#[from] Box<Status>),
 
     #[error("MalformedResponse {0}")]
     MalformedResponse(String),
@@ -71,6 +71,12 @@ pub enum GeyserConsumerError {
 }
 
 pub type Result<T> = std::result::Result<T, GeyserConsumerError>;
+
+impl From<Status> for GeyserConsumerError {
+    fn from(value: Status) -> Self {
+        Self::GrpcError(Box::new(value))
+    }
+}
 
 // Assuming updates are mostly streamed in order, the oldest entry will be ~33 minutes old before it's pruned.
 // This assumes 400ms block times.
