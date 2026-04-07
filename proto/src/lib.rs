@@ -7,7 +7,7 @@ use {
     },
     solana_message::v0::LoadedAddresses,
     solana_serde::default_on_eof,
-    solana_transaction_context::TransactionReturnData,
+    solana_transaction_context::transaction::TransactionReturnData,
     solana_transaction_error::TransactionResult as Result,
     solana_transaction_status::{
         InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
@@ -63,6 +63,7 @@ impl From<StoredExtendedReward> for Reward {
             post_balance,
             reward_type,
             commission,
+            commission_bps: None,
         }
     }
 }
@@ -75,6 +76,7 @@ impl From<Reward> for StoredExtendedReward {
             post_balance,
             reward_type,
             commission,
+            ..
         } = value;
         Self {
             pubkey,
