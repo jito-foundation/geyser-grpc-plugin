@@ -8,11 +8,7 @@ pub fn get_current_time_us_u32() -> u32 {
 /// Returns the absolute duration since other timestamp
 pub fn duration_since_us(timestamp_a_us: u32, timestamp_b_us: u32) -> u32 {
     // use i64 to avoid overflow
-    let normal_diff = if timestamp_a_us > timestamp_b_us {
-        timestamp_a_us - timestamp_b_us
-    } else {
-        timestamp_b_us - timestamp_a_us
-    };
+    let normal_diff = timestamp_a_us.abs_diff(timestamp_b_us);
     let wraparound_diff = u32::MAX.wrapping_sub(normal_diff).wrapping_add(1);
     normal_diff.min(wraparound_diff)
 }

@@ -15,7 +15,7 @@ use solana_message::{
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::{versioned::VersionedTransaction, Transaction};
-use solana_transaction_context::TransactionReturnData;
+use solana_transaction_context::transaction::TransactionReturnData;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::{
     ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward, RewardType,
@@ -124,6 +124,7 @@ impl From<confirmed_block::Reward> for Reward {
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
+            commission_bps: None,
         }
     }
 }
@@ -1270,6 +1271,7 @@ mod test {
             post_balance: 321,
             reward_type: None,
             commission: None,
+            commission_bps: None,
         };
         let gen_reward: confirmed_block::Reward = reward.clone().into();
         assert_eq!(reward, gen_reward.into());

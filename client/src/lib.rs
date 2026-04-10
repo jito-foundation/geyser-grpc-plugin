@@ -1,3 +1,4 @@
+#[allow(clippy::result_large_err)]
 pub mod geyser_consumer;
 pub mod interceptor;
 pub mod types;
