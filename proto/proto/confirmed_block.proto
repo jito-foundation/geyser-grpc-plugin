@@ -26,10 +26,22 @@ message Transaction {
 message Message {
     MessageHeader header = 1;
     repeated bytes account_keys = 2;
+    // For V1 messages this holds the lifetime specifier (a blockhash).
     bytes recent_blockhash = 3;
     repeated CompiledInstruction instructions = 4;
     bool versioned = 5;
     repeated MessageAddressTableLookup address_table_lookups = 6;
+    // Set only for V1 (SIMD-0385) messages, which carry an inline compute
+    // budget. Absent for legacy and V0 messages.
+    TransactionConfig config = 7;
+}
+
+// Inline compute-budget configuration carried by V1 (SIMD-0385) messages.
+message TransactionConfig {
+    optional uint64 priority_fee = 1;
+    optional uint32 compute_unit_limit = 2;
+    optional uint32 loaded_accounts_data_size_limit = 3;
+    optional uint32 heap_size = 4;
 }
 
 message MessageHeader {
@@ -120,6 +132,7 @@ enum RewardType {
     Rent = 2;
     Staking = 3;
     Voting = 4;
+    DeactivatedStake = 5;
 }
 
 message Reward {

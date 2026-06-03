@@ -10,6 +10,7 @@ use solana_message::{
     compiled_instruction::CompiledInstruction,
     legacy::Message as LegacyMessage,
     v0::{self, LoadedAddresses, MessageAddressTableLookup},
+    v1::{self, TransactionConfig},
     MessageHeader, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
@@ -103,6 +104,7 @@ impl From<Reward> for confirmed_block::Reward {
                 Some(RewardType::Rent) => confirmed_block::RewardType::Rent,
                 Some(RewardType::Staking) => confirmed_block::RewardType::Staking,
                 Some(RewardType::Voting) => confirmed_block::RewardType::Voting,
+                Some(RewardType::DeactivatedStake) => confirmed_block::RewardType::DeactivatedStake,
             } as i32,
             commission: reward.commission.map(|c| c.to_string()).unwrap_or_default(),
         }
@@ -121,6 +123,7 @@ impl From<confirmed_block::Reward> for Reward {
                 2 => Some(RewardType::Rent),
                 3 => Some(RewardType::Staking),
                 4 => Some(RewardType::Voting),
+                5 => Some(RewardType::DeactivatedStake),
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
@@ -292,6 +295,7 @@ impl From<LegacyMessage> for confirmed_block::Message {
                 .collect(),
             versioned: false,
             address_table_lookups: vec![],
+            config: None,
         }
     }
 }
@@ -319,7 +323,50 @@ impl From<VersionedMessage> for confirmed_block::Message {
                     .into_iter()
                     .map(|lookup| lookup.into())
                     .collect(),
+                config: None,
             },
+            // V1 (SIMD-0385) messages carry an inline compute budget (`config`),
+            // use a `lifetime_specifier` in place of `recent_blockhash`, and do
+            // not support address table lookups.
+            VersionedMessage::V1(message) => Self {
+                header: Some(message.header.into()),
+                account_keys: message
+                    .account_keys
+                    .iter()
+                    .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(key).into())
+                    .collect(),
+                recent_blockhash: message.lifetime_specifier.to_bytes().into(),
+                instructions: message
+                    .instructions
+                    .into_iter()
+                    .map(|ix| ix.into())
+                    .collect(),
+                versioned: true,
+                address_table_lookups: vec![],
+                config: Some(message.config.into()),
+            },
+        }
+    }
+}
+
+impl From<TransactionConfig> for confirmed_block::TransactionConfig {
+    fn from(config: TransactionConfig) -> Self {
+        Self {
+            priority_fee: config.priority_fee,
+            compute_unit_limit: config.compute_unit_limit,
+            loaded_accounts_data_size_limit: config.loaded_accounts_data_size_limit,
+            heap_size: config.heap_size,
+        }
+    }
+}
+
+impl From<confirmed_block::TransactionConfig> for TransactionConfig {
+    fn from(config: confirmed_block::TransactionConfig) -> Self {
+        Self {
+            priority_fee: config.priority_fee,
+            compute_unit_limit: config.compute_unit_limit,
+            loaded_accounts_data_size_limit: config.loaded_accounts_data_size_limit,
+            heap_size: config.heap_size,
         }
     }
 }
@@ -347,6 +394,17 @@ impl From<confirmed_block::Message> for VersionedMessage {
                 header,
                 account_keys,
                 recent_blockhash,
+                instructions,
+            })
+        } else if let Some(config) = value.config {
+            // A `config` is only ever set for V1 (SIMD-0385) messages, so its
+            // presence disambiguates V1 from V0. The V1 lifetime specifier is
+            // carried in the `recent_blockhash` field.
+            Self::V1(v1::Message {
+                header,
+                config: config.into(),
+                lifetime_specifier: recent_blockhash,
+                account_keys,
                 instructions,
             })
         } else {
@@ -1291,6 +1349,83 @@ mod test {
         reward.reward_type = Some(RewardType::Staking);
         let gen_reward: confirmed_block::Reward = reward.clone().into();
         assert_eq!(reward, gen_reward.into());
+
+        reward.reward_type = Some(RewardType::DeactivatedStake);
+        let gen_reward: confirmed_block::Reward = reward.clone().into();
+        assert_eq!(reward, gen_reward.into());
+    }
+
+    fn sample_header() -> MessageHeader {
+        MessageHeader {
+            num_required_signatures: 1,
+            num_readonly_signed_accounts: 0,
+            num_readonly_unsigned_accounts: 1,
+        }
+    }
+
+    fn sample_instructions() -> Vec<CompiledInstruction> {
+        vec![CompiledInstruction {
+            program_id_index: 2,
+            accounts: vec![0, 1],
+            data: vec![3, 4, 5],
+        }]
+    }
+
+    // A V1 (SIMD-0385) message must survive a round-trip through the protobuf
+    // representation, including its inline compute-budget `config` and the
+    // `lifetime_specifier` carried in the `recent_blockhash` field.
+    #[test]
+    fn test_versioned_message_v1_roundtrip() {
+        let message = VersionedMessage::V1(v1::Message {
+            header: sample_header(),
+            config: TransactionConfig {
+                priority_fee: Some(10_000),
+                compute_unit_limit: Some(200_000),
+                loaded_accounts_data_size_limit: None,
+                heap_size: Some(64 * 1024),
+            },
+            lifetime_specifier: Hash::new_from_array([7u8; HASH_BYTES]),
+            account_keys: vec![
+                Pubkey::new_from_array([1u8; 32]),
+                Pubkey::new_from_array([2u8; 32]),
+                Pubkey::new_from_array([3u8; 32]),
+            ],
+            instructions: sample_instructions(),
+        });
+
+        let proto: confirmed_block::Message = message.clone().into();
+        // V1 is wire-tagged by a present `config`; it sets `versioned` and
+        // never emits address table lookups.
+        assert!(proto.versioned);
+        assert!(proto.config.is_some());
+        assert!(proto.address_table_lookups.is_empty());
+
+        let decoded: VersionedMessage = proto.into();
+        assert_eq!(message, decoded);
+    }
+
+    // Adding the V1 `config` field must not change how V0 messages encode or
+    // decode: a V0 message has no `config` and must still round-trip as V0.
+    #[test]
+    fn test_versioned_message_v0_roundtrip_unaffected() {
+        let message = VersionedMessage::V0(v0::Message {
+            header: sample_header(),
+            account_keys: vec![
+                Pubkey::new_from_array([1u8; 32]),
+                Pubkey::new_from_array([2u8; 32]),
+            ],
+            recent_blockhash: Hash::new_from_array([9u8; HASH_BYTES]),
+            instructions: sample_instructions(),
+            address_table_lookups: vec![],
+        });
+
+        let proto: confirmed_block::Message = message.clone().into();
+        assert!(proto.versioned);
+        assert!(proto.config.is_none());
+
+        let decoded: VersionedMessage = proto.into();
+        assert!(matches!(decoded, VersionedMessage::V0(_)));
+        assert_eq!(message, decoded);
     }
 
     #[test]
