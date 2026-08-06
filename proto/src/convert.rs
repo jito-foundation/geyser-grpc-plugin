@@ -907,7 +907,6 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             36 => TransactionError::UnbalancedTransaction,
             37 => TransactionError::ProgramCacheHitMaxLimit,
             38 => TransactionError::CommitCancelled,
-            39 => TransactionError::InstructionsSysvarOverflow,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -1031,9 +1030,6 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 }
                 TransactionError::CommitCancelled => {
                     tx_by_addr::TransactionErrorType::CommitCancelled
-                }
-                TransactionError::InstructionsSysvarOverflow => {
-                    tx_by_addr::TransactionErrorType::InstructionsSysvarOverflow
                 }
             } as i32,
             instruction_error: match transaction_error {
