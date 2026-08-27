@@ -360,8 +360,7 @@ impl GeyserConsumer {
         if update_slot
             < highest_rooted_slot
                 .load(Ordering::Relaxed)
-                .checked_sub(max_rooted_slot_distance)
-                .unwrap_or_default()
+                .saturating_sub(max_rooted_slot_distance)
         {
             return Err(GeyserConsumerError::StaleAccountUpdate {
                 update_slot,
