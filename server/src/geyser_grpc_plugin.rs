@@ -11,9 +11,13 @@ use std::{
     time::SystemTime,
 };
 
-use agave_geyser_plugin_interface::geyser_plugin_interface::{
-    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-    ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
+use agave_geyser_plugin_interface::{
+    geyser_plugin_interface::{
+        GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
+        ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result as PluginResult,
+        SlotStatus,
+    },
+    transaction_status_meta as plugin_meta,
 };
 use bs58;
 use crossbeam_channel::{bounded, Sender, TrySendError};
@@ -29,6 +33,11 @@ use log::*;
 use serde_derive::Deserialize;
 use serde_json;
 use serde_with::{serde_as, DefaultOnError};
+use solana_account_decoder::parse_token::UiTokenAmount;
+use solana_transaction_context::transaction::TransactionReturnData;
+use solana_transaction_status::{
+    InnerInstruction, InnerInstructions, Reward, TransactionStatusMeta, TransactionTokenBalance,
+};
 use tokio::{runtime::Runtime, sync::oneshot};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
@@ -390,46 +399,19 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     ) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
 
-        let transaction_update = match transaction {
-            ReplicaTransactionInfoVersions::V0_0_1(tx) => TimestampedTransactionUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                transaction: Some(TransactionUpdate {
-                    slot,
-                    signature: tx.signature.to_string(),
-                    is_vote: tx.is_vote,
-                    tx_idx: u64::MAX,
-                    tx: Some(ConfirmedTransaction {
-                        transaction: Some(tx.transaction.to_versioned_transaction().into()),
-                        meta: Some(tx.transaction_status_meta.clone().into()),
-                    }),
+        let ReplicaTransactionInfoVersions::V0_0_4(tx) = transaction;
+        let transaction_update = TimestampedTransactionUpdate {
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+            transaction: Some(TransactionUpdate {
+                slot,
+                signature: tx.signature.to_string(),
+                is_vote: tx.is_vote,
+                tx_idx: tx.index as u64,
+                tx: Some(ConfirmedTransaction {
+                    transaction: Some(tx.transaction.clone().into()),
+                    meta: Some(owned_meta(tx.transaction_status_meta).into()),
                 }),
-            },
-            ReplicaTransactionInfoVersions::V0_0_2(tx) => TimestampedTransactionUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                transaction: Some(TransactionUpdate {
-                    slot,
-                    signature: tx.signature.to_string(),
-                    is_vote: tx.is_vote,
-                    tx_idx: tx.index as u64,
-                    tx: Some(ConfirmedTransaction {
-                        transaction: Some(tx.transaction.to_versioned_transaction().into()),
-                        meta: Some(tx.transaction_status_meta.clone().into()),
-                    }),
-                }),
-            },
-            ReplicaTransactionInfoVersions::V0_0_3(tx) => TimestampedTransactionUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                transaction: Some(TransactionUpdate {
-                    slot,
-                    signature: tx.signature.to_string(),
-                    is_vote: tx.is_vote,
-                    tx_idx: tx.index as u64,
-                    tx: Some(ConfirmedTransaction {
-                        transaction: Some(tx.transaction.clone().into()),
-                        meta: Some(tx.transaction_status_meta.clone().into()),
-                    }),
-                }),
-            },
+            }),
         };
 
         match data.transaction_update_sender.try_send(transaction_update) {
@@ -450,72 +432,26 @@ impl GeyserPlugin for GeyserGrpcPlugin {
     fn notify_block_metadata(&self, block_info: ReplicaBlockInfoVersions) -> PluginResult<()> {
         let data = self.data.as_ref().expect("plugin must be initialized");
 
-        let block = match block_info {
-            ReplicaBlockInfoVersions::V0_0_1(block) => TimestampedBlockUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                block_update: Some(BlockUpdate {
-                    slot: block.slot,
-                    blockhash: block.blockhash.to_string(),
-                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
-                    block_time: block.block_time.map(|t| prost_types::Timestamp {
-                        seconds: t,
-                        nanos: 0,
-                    }),
-                    block_height: block.block_height,
-                    executed_transaction_count: None,
-                    entry_count: None,
+        let ReplicaBlockInfoVersions::V0_0_5(block) = block_info;
+        let block = TimestampedBlockUpdate {
+            ts: Some(prost_types::Timestamp::from(SystemTime::now())),
+            block_update: Some(BlockUpdate {
+                slot: block.slot,
+                blockhash: block.blockhash.to_string(),
+                rewards: block
+                    .rewards
+                    .rewards
+                    .iter()
+                    .map(|r| owned_reward(r).into())
+                    .collect(),
+                block_time: block.block_time.map(|t| prost_types::Timestamp {
+                    seconds: t,
+                    nanos: 0,
                 }),
-            },
-            ReplicaBlockInfoVersions::V0_0_2(block) => TimestampedBlockUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                block_update: Some(BlockUpdate {
-                    slot: block.slot,
-                    blockhash: block.blockhash.to_string(),
-                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
-                    block_time: block.block_time.map(|t| prost_types::Timestamp {
-                        seconds: t,
-                        nanos: 0,
-                    }),
-                    block_height: block.block_height,
-                    executed_transaction_count: Some(block.executed_transaction_count),
-                    entry_count: None,
-                }),
-            },
-            ReplicaBlockInfoVersions::V0_0_3(block) => TimestampedBlockUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                block_update: Some(BlockUpdate {
-                    slot: block.slot,
-                    blockhash: block.blockhash.to_string(),
-                    rewards: block.rewards.iter().map(|r| (*r).clone().into()).collect(),
-                    block_time: block.block_time.map(|t| prost_types::Timestamp {
-                        seconds: t,
-                        nanos: 0,
-                    }),
-                    block_height: block.block_height,
-                    executed_transaction_count: Some(block.executed_transaction_count),
-                    entry_count: Some(block.entry_count),
-                }),
-            },
-            ReplicaBlockInfoVersions::V0_0_4(block) => TimestampedBlockUpdate {
-                ts: Some(prost_types::Timestamp::from(SystemTime::now())),
-                block_update: Some(BlockUpdate {
-                    slot: block.slot,
-                    blockhash: block.blockhash.to_string(),
-                    rewards: block
-                        .rewards
-                        .rewards
-                        .iter()
-                        .map(|r| (*r).clone().into())
-                        .collect(),
-                    block_time: block.block_time.map(|t| prost_types::Timestamp {
-                        seconds: t,
-                        nanos: 0,
-                    }),
-                    block_height: block.block_height,
-                    executed_transaction_count: Some(block.executed_transaction_count),
-                    entry_count: Some(block.entry_count),
-                }),
-            },
+                block_height: block.block_height,
+                executed_transaction_count: Some(block.executed_transaction_count),
+                entry_count: Some(block.entry_count),
+            }),
         };
         match data.block_update_sender.try_send(block) {
             Ok(_) => Ok(()),
@@ -631,9 +567,164 @@ impl Interceptor for AccessTokenChecker {
     }
 }
 
+// ponytail: interface 5.0 hands plugins borrowed mirror types; copying them back into
+// the owned agave types reuses the proto crate's existing, tested conversions.
+fn owned_meta(meta: &plugin_meta::TransactionStatusMeta) -> TransactionStatusMeta {
+    TransactionStatusMeta {
+        status: meta.status.map_err(Clone::clone),
+        fee: meta.fee,
+        pre_balances: meta.pre_balances.to_vec(),
+        post_balances: meta.post_balances.to_vec(),
+        inner_instructions: meta.inner_instructions.map(|inner| {
+            inner
+                .iter()
+                .map(|ixs| InnerInstructions {
+                    index: ixs.index,
+                    instructions: ixs
+                        .instructions
+                        .iter()
+                        .map(|ix| InnerInstruction {
+                            instruction: ix.instruction.clone(),
+                            stack_height: ix.stack_height,
+                        })
+                        .collect(),
+                })
+                .collect()
+        }),
+        log_messages: meta
+            .log_messages
+            .map(|logs| logs.iter().map(|log| log.to_string()).collect()),
+        pre_token_balances: meta.pre_token_balances.map(owned_token_balances),
+        post_token_balances: meta.post_token_balances.map(owned_token_balances),
+        rewards: meta
+            .rewards
+            .map(|rewards| rewards.iter().map(owned_reward).collect()),
+        loaded_addresses: meta.loaded_addresses.clone(),
+        return_data: meta.return_data.map(|data| TransactionReturnData {
+            program_id: data.program_id,
+            data: data.data.to_vec(),
+        }),
+        compute_units_consumed: meta.compute_units_consumed,
+        cost_units: meta.cost_units,
+    }
+}
+
+fn owned_token_balances(
+    balances: &[plugin_meta::TransactionTokenBalance],
+) -> Vec<TransactionTokenBalance> {
+    balances
+        .iter()
+        .map(|balance| TransactionTokenBalance {
+            account_index: balance.account_index,
+            mint: balance.mint.to_string(),
+            ui_token_amount: UiTokenAmount {
+                ui_amount: balance.ui_token_amount.ui_amount,
+                decimals: balance.ui_token_amount.decimals,
+                amount: balance.ui_token_amount.amount.to_string(),
+                ui_amount_string: balance.ui_token_amount.ui_amount_string.to_string(),
+            },
+            owner: balance.owner.to_string(),
+            program_id: balance.program_id.to_string(),
+        })
+        .collect()
+}
+
+fn owned_reward(reward: &plugin_meta::Reward) -> Reward {
+    Reward {
+        pubkey: reward.pubkey.to_string(),
+        lamports: reward.lamports,
+        post_balance: reward.post_balance,
+        reward_type: reward.reward_type,
+        commission: reward.commission,
+        commission_bps: reward.commission_bps,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_owned_meta_copies_every_field() {
+        use solana_message::{compiled_instruction::CompiledInstruction, v0::LoadedAddresses};
+        use solana_transaction_error::TransactionError;
+        use solana_transaction_status::RewardType;
+
+        let err = TransactionError::AccountInUse;
+        let compiled = CompiledInstruction::new_from_raw_parts(1, vec![2, 3], vec![0]);
+        let inner = [plugin_meta::InnerInstruction {
+            instruction: &compiled,
+            stack_height: Some(2),
+        }];
+        let inner_instructions = [plugin_meta::InnerInstructions {
+            index: 4,
+            instructions: &inner,
+        }];
+        let token_balance = [plugin_meta::TransactionTokenBalance {
+            account_index: 1,
+            mint: "mint",
+            ui_token_amount: plugin_meta::UiTokenAmount {
+                ui_amount: Some(1.5),
+                decimals: 2,
+                amount: "150",
+                ui_amount_string: "1.5",
+            },
+            owner: "owner",
+            program_id: "program",
+        }];
+        let rewards = [plugin_meta::Reward {
+            pubkey: "pubkey",
+            lamports: -7,
+            post_balance: 8,
+            reward_type: Some(RewardType::VATDebit),
+            commission: Some(5),
+            commission_bps: Some(500),
+        }];
+        let loaded_addresses = LoadedAddresses::default();
+        let meta = plugin_meta::TransactionStatusMeta {
+            status: Err(&err),
+            fee: 5000,
+            pre_balances: &[10, 20],
+            post_balances: &[9, 21],
+            inner_instructions: Some(&inner_instructions),
+            log_messages: Some(&["log"]),
+            pre_token_balances: Some(&token_balance),
+            post_token_balances: None,
+            rewards: Some(&rewards),
+            loaded_addresses: &loaded_addresses,
+            return_data: Some(plugin_meta::TransactionReturnData {
+                program_id: Default::default(),
+                data: &[1, 2],
+            }),
+            compute_units_consumed: Some(42),
+            cost_units: Some(43),
+        };
+
+        let owned = owned_meta(&meta);
+        assert_eq!(owned.status, Err(err));
+        assert_eq!(owned.fee, 5000);
+        assert_eq!(owned.post_balances, vec![9, 21]);
+        let owned_inner = &owned.inner_instructions.as_ref().unwrap()[0];
+        assert_eq!(owned_inner.index, 4);
+        assert_eq!(owned_inner.instructions[0].instruction, compiled);
+        assert_eq!(owned_inner.instructions[0].stack_height, Some(2));
+        assert_eq!(owned.log_messages, Some(vec!["log".to_string()]));
+        let balance = &owned.pre_token_balances.as_ref().unwrap()[0];
+        assert_eq!(balance.ui_token_amount.amount, "150");
+        assert_eq!(balance.program_id, "program");
+        assert_eq!(owned.post_token_balances, None);
+        let reward = &owned.rewards.as_ref().unwrap()[0];
+        assert_eq!(reward.reward_type, Some(RewardType::VATDebit));
+        assert_eq!(reward.commission_bps, Some(500));
+        assert_eq!(owned.return_data.as_ref().unwrap().data, vec![1, 2]);
+        assert_eq!(owned.cost_units, Some(43));
+
+        // The owned value must still feed the existing proto conversion.
+        let proto: jito_geyser_protos::solana::storage::confirmed_block::TransactionStatusMeta =
+            owned.into();
+        assert_eq!(proto.fee, 5000);
+        assert_eq!(proto.rewards[0].commission_bps, "500");
+    }
 
     #[test]
     fn test_plugin_config_deserialization() {

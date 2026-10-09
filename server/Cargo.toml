@@ -25,9 +25,11 @@ serde = { workspace = true }
 serde_derive = { workspace = true }
 serde_json = { workspace = true }
 serde_with = { workspace = true }
+solana-account-decoder = { workspace = true }
 solana-logger = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program = { workspace = true }
+solana-transaction-context = { workspace = true }
 solana-transaction-status = { workspace = true }
 solana-vote-interface = { workspace = true }
 thiserror = { workspace = true }
@@ -38,3 +40,7 @@ uuid = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }
+
+[dev-dependencies]
+solana-message = { workspace = true }
+solana-transaction-error = { workspace = true }

@@ -5,7 +5,7 @@ use std::{
 
 use solana_account_decoder::parse_token::{real_number_string_trimmed, UiTokenAmount};
 use solana_hash::{Hash, HASH_BYTES};
-use solana_instruction::error::InstructionError;
+use solana_instruction_error::InstructionError;
 use solana_message::{
     compiled_instruction::CompiledInstruction,
     legacy::Message as LegacyMessage,
@@ -105,8 +105,13 @@ impl From<Reward> for confirmed_block::Reward {
                 Some(RewardType::Staking) => confirmed_block::RewardType::Staking,
                 Some(RewardType::Voting) => confirmed_block::RewardType::Voting,
                 Some(RewardType::DeactivatedStake) => confirmed_block::RewardType::DeactivatedStake,
+                Some(RewardType::VATDebit) => confirmed_block::RewardType::VatDebit,
             } as i32,
             commission: reward.commission.map(|c| c.to_string()).unwrap_or_default(),
+            commission_bps: reward
+                .commission_bps
+                .map(|bps| bps.to_string())
+                .unwrap_or_default(),
         }
     }
 }
@@ -124,10 +129,11 @@ impl From<confirmed_block::Reward> for Reward {
                 3 => Some(RewardType::Staking),
                 4 => Some(RewardType::Voting),
                 5 => Some(RewardType::DeactivatedStake),
+                6 => Some(RewardType::VATDebit),
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
-            commission_bps: None,
+            commission_bps: reward.commission_bps.parse::<u16>().ok(),
         }
     }
 }
@@ -839,6 +845,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
                     51 => InstructionError::MaxAccountsExceeded,
                     52 => InstructionError::MaxInstructionTraceLengthExceeded,
                     53 => InstructionError::BuiltinProgramsMustConsumeComputeUnits,
+                    54 => InstructionError::BailOut,
                     _ => return Err("Invalid InstructionError"),
                 };
 
@@ -907,6 +914,7 @@ impl TryFrom<tx_by_addr::TransactionError> for TransactionError {
             36 => TransactionError::UnbalancedTransaction,
             37 => TransactionError::ProgramCacheHitMaxLimit,
             38 => TransactionError::CommitCancelled,
+            39 => TransactionError::BailOut,
             _ => return Err("Invalid TransactionError"),
         })
     }
@@ -1031,6 +1039,11 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 TransactionError::CommitCancelled => {
                     tx_by_addr::TransactionErrorType::CommitCancelled
                 }
+                TransactionError::BailOut => tx_by_addr::TransactionErrorType::BailOutTx,
+                // `TransactionError` is `#[non_exhaustive]`, so the match needs a
+                // wildcard. `test_error_enums` round-trips every proto tag, which
+                // catches a variant reaching it (mirrors agave storage-proto).
+                _ => unreachable!("no tx_by_addr tag for {transaction_error:?}"),
             } as i32,
             instruction_error: match transaction_error {
                 TransactionError::InstructionError(index, ref instruction_error) => {
@@ -1198,6 +1211,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                             InstructionError::BuiltinProgramsMustConsumeComputeUnits => {
                                 tx_by_addr::InstructionErrorType::BuiltinProgramsMustConsumeComputeUnits
                             }
+                            InstructionError::BailOut => tx_by_addr::InstructionErrorType::BailOut,
+                            // See the `TransactionErrorType` wildcard note above.
+                            _ => unreachable!("no tx_by_addr tag for {instruction_error:?}"),
                         } as i32,
                         custom: match instruction_error {
                             InstructionError::Custom(custom) => {

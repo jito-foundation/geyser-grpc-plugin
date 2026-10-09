@@ -18,6 +18,8 @@ use {
 pub mod convert;
 
 pub mod solana {
+    // Generated tonic code returns `tonic::Status` (176 bytes), which clippy 1.98 flags.
+    #[allow(clippy::result_large_err)]
     pub mod geyser {
         tonic::include_proto!("solana.geyser");
     }
