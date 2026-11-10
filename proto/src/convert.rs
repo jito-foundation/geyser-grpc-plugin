@@ -106,6 +106,13 @@ impl From<Reward> for confirmed_block::Reward {
                 Some(RewardType::Voting) => confirmed_block::RewardType::Voting,
                 Some(RewardType::DeactivatedStake) => confirmed_block::RewardType::DeactivatedStake,
                 Some(RewardType::VATDebit) => confirmed_block::RewardType::VatDebit,
+                Some(RewardType::BlockRevenueSharing) => {
+                    confirmed_block::RewardType::BlockRevenueSharing
+                }
+                // `RewardType` is `#[non_exhaustive]`, so the match needs a wildcard.
+                // `test_reward_type_encode` round-trips every `RewardType::VARIANTS`
+                // entry, which catches a variant reaching it (mirrors agave storage-proto).
+                Some(reward_type) => unreachable!("no confirmed_block tag for {reward_type:?}"),
             } as i32,
             commission: reward.commission.map(|c| c.to_string()).unwrap_or_default(),
             commission_bps: reward
@@ -130,6 +137,7 @@ impl From<confirmed_block::Reward> for Reward {
                 4 => Some(RewardType::Voting),
                 5 => Some(RewardType::DeactivatedStake),
                 6 => Some(RewardType::VATDebit),
+                7 => Some(RewardType::BlockRevenueSharing),
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
@@ -1350,25 +1358,11 @@ mod test {
         let gen_reward: confirmed_block::Reward = reward.clone().into();
         assert_eq!(reward, gen_reward.into());
 
-        reward.reward_type = Some(RewardType::Fee);
-        let gen_reward: confirmed_block::Reward = reward.clone().into();
-        assert_eq!(reward, gen_reward.into());
-
-        reward.reward_type = Some(RewardType::Rent);
-        let gen_reward: confirmed_block::Reward = reward.clone().into();
-        assert_eq!(reward, gen_reward.into());
-
-        reward.reward_type = Some(RewardType::Voting);
-        let gen_reward: confirmed_block::Reward = reward.clone().into();
-        assert_eq!(reward, gen_reward.into());
-
-        reward.reward_type = Some(RewardType::Staking);
-        let gen_reward: confirmed_block::Reward = reward.clone().into();
-        assert_eq!(reward, gen_reward.into());
-
-        reward.reward_type = Some(RewardType::DeactivatedStake);
-        let gen_reward: confirmed_block::Reward = reward.clone().into();
-        assert_eq!(reward, gen_reward.into());
+        for reward_type in RewardType::VARIANTS {
+            reward.reward_type = Some(*reward_type);
+            let gen_reward: confirmed_block::Reward = reward.clone().into();
+            assert_eq!(reward, gen_reward.into());
+        }
     }
 
     fn sample_header() -> MessageHeader {

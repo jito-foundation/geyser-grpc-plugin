@@ -13,9 +13,9 @@ use std::{
 
 use agave_geyser_plugin_interface::{
     geyser_plugin_interface::{
-        GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-        ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result as PluginResult,
-        SlotStatus,
+        GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3, ReplicaAccountInfoV4,
+        ReplicaAccountInfoVersions, ReplicaBlockInfoVersions, ReplicaEntryInfoVersions,
+        ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
     },
     transaction_status_meta as plugin_meta,
 };
@@ -289,19 +289,40 @@ impl GeyserPlugin for GeyserGrpcPlugin {
                     }),
                 }
             }
-            ReplicaAccountInfoVersions::V0_0_3(account) => TimestampedAccountUpdate {
+            // AccountUpdate has no field for V4's `txn_index`.
+            ReplicaAccountInfoVersions::V0_0_3(ReplicaAccountInfoV3 {
+                pubkey,
+                lamports,
+                owner,
+                executable,
+                rent_epoch,
+                data,
+                write_version,
+                txn,
+            })
+            | ReplicaAccountInfoVersions::V0_0_4(ReplicaAccountInfoV4 {
+                pubkey,
+                lamports,
+                owner,
+                executable,
+                rent_epoch,
+                data,
+                write_version,
+                txn,
+                txn_index: _,
+            }) => TimestampedAccountUpdate {
                 ts: Some(prost_types::Timestamp::from(SystemTime::now())),
                 account_update: Some(AccountUpdate {
                     slot,
-                    pubkey: account.pubkey.to_vec(),
-                    lamports: account.lamports,
-                    owner: account.owner.to_vec(),
-                    is_executable: account.executable,
-                    rent_epoch: account.rent_epoch,
-                    data: account.data.to_vec(),
-                    seq: account.write_version,
+                    pubkey: pubkey.to_vec(),
+                    lamports: *lamports,
+                    owner: owner.to_vec(),
+                    is_executable: *executable,
+                    rent_epoch: *rent_epoch,
+                    data: data.to_vec(),
+                    seq: *write_version,
                     is_startup,
-                    tx_signature: account.txn.map(|tx| tx.signature().to_string()),
+                    tx_signature: txn.map(|tx| tx.signature().to_string()),
                     replica_version: 2,
                 }),
             },
